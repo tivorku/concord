@@ -14,6 +14,7 @@ type Data struct {
 	Refresh string `json:"refresh_token"`
 }
 var (
+
 	number, sms_code string
 	data Data
 	bearer_url = fmt.Sprintf("https://sso.t2.ru/auth/realms/tele2-b2c/protocol/openid-connect/token")
