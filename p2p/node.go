@@ -3,12 +3,12 @@ package p2p
 import (
 	"context"
 	"encoding/hex"
-/*	"io"
-	"log"*/
+    "io"
 	"net"
 	"time"
 	"os"
 	"fmt"
+	"runtime"
 	"strings"
 	"encoding/json"
 	
@@ -23,63 +23,83 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/wlynxg/anet"
+	"github.com/libp2p/go-libp2p/core/protocol"
 )
-
+const ProtocolProxy protocol.ID = "/mdn/proxy/1.0.0"
 type NodeMessage struct {
 	Type   string `json:"type"`   // ANNOUNCE, ROCKET_FIRED, TOP_STATUS
 	LotID  string `json:"lot_id"` // ID лота из Т2
 	PeerID string `json:"peer_id"`// ID отправителя (ноды)
 	T      int64  `json:"t"`      // Твои тики (время в топе)
 	R      int    `json:"r"`      // Твои ракеты
+	JoinedAt int64 `json:"joined_at"`
+	IsBot  bool   `json:"is_bot"`
 }
-
+type MarketNode struct {
+	Host    host.Host
+	KadDHT  *dht.IpfsDHT
+	PubSub  *pubsub.PubSub
+	Topic   *pubsub.Topic
+	Sub     *pubsub.Subscription
+	Ledger  *Ledger        // Тот самый мозг-память
+	Ctx     context.Context
+}
 func InitHost(ctx context.Context, privKey crypto.PrivKey) (host.Host, error) {
-    l, _ := net.Listen("tcp4", "0.0.0.0:0")
-	selectedPort := fmt.Sprintf("%d", l.Addr().(*net.TCPAddr).Port)
-	l.Close() 
-
-
-	var myAddrs []multiaddr.Multiaddr
-	ifaces, _ := anet.InterfaceAddrs()
-	for _, a := range ifaces {
-		raw := a.String()
-		ip := strings.Split(raw, "/")[0]
-		if ip == "127.0.0.1" || strings.Contains(ip, ":") || !strings.Contains(ip, ".") {
-			continue
-		}
-
-		// Внутри твоего цикла по интерфейсам
-        mTCP, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%s", ip, selectedPort))
-        if err == nil {
-            myAddrs = append(myAddrs, mTCP)
-        }
-        
-        // Добавь это для скорости и стабильности
-        mQUIC, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/udp/%s/quic-v1", ip, selectedPort))
-        if err == nil {
-            myAddrs = append(myAddrs, mQUIC)
-        }
-		
+    var h host.Host
+    var err error
+    if runtime.GOOS == "android" {
+        l, _ := net.Listen("tcp4", "0.0.0.0:0")
+    	selectedPort := fmt.Sprintf("%d", l.Addr().(*net.TCPAddr).Port)
+    	l.Close() 
+    
+    
+    	var myAddrs []multiaddr.Multiaddr
+    	ifaces, _ := anet.InterfaceAddrs()
+    	for _, a := range ifaces {
+    		raw := a.String()
+    		ip := strings.Split(raw, "/")[0]
+    		if ip == "127.0.0.1" || strings.Contains(ip, ":") || !strings.Contains(ip, ".") {
+    			continue
+    		}
+    
+    		// Внутри твоего цикла по интерфейсам
+            mTCP, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%s", ip, selectedPort))
+            if err == nil {
+                myAddrs = append(myAddrs, mTCP)
+            }
+            
+            // Добавь это для скорости и стабильности
+            mQUIC, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/udp/%s/quic-v1", ip, selectedPort))
+            if err == nil {
+                myAddrs = append(myAddrs, mQUIC)
+            }
+    		
+    	}
+    	h, err = libp2p.New(
+    		libp2p.Identity(privKey),
+    		libp2p.ListenAddrs(myAddrs...),
+    		libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
+    			return myAddrs
+    		}),
+    		libp2p.NATPortMap(),
+    		libp2p.EnableNATService(),
+    		libp2p.EnableHolePunching(),
+    		libp2p.EnableAutoRelayWithStaticRelays(dht.GetDefaultBootstrapPeerAddrInfos()),
+    	)
+	} else {
+	    h, err = libp2p.New(
+    		libp2p.Identity(privKey),
+    		libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/0", "/ip4/0.0.0.0/udp/0/quic-v1"),
+    		libp2p.NATPortMap(),
+    		libp2p.EnableNATService(),
+    		libp2p.EnableHolePunching(),
+    		libp2p.EnableAutoRelayWithStaticRelays(dht.GetDefaultBootstrapPeerAddrInfos()),
+	    )
 	}
 
-	h, err := libp2p.New(
-		libp2p.Identity(privKey),
-		libp2p.ListenAddrs(myAddrs...),
-		libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
-			return myAddrs
-		}),
-		libp2p.NATPortMap(),
-		libp2p.EnableNATService(),
-		libp2p.EnableHolePunching(),
-		libp2p.EnableAutoRelayWithStaticRelays(dht.GetDefaultBootstrapPeerAddrInfos()),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("не удалось запустить хост: %w", err)
-	}
-
-	return h, nil
+	return h, err
 }
-func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
+func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) *dht.IpfsDHT {
 
 	kad, err := dht.New(ctx, h, dht.Mode(dht.ModeClient))
 	if err != nil {
@@ -141,53 +161,29 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
 			time.Sleep(10*time.Second)
 		}
 	}()
+	return kad
 }
+func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, s *Strategist, bearer, number string) (*pubsub.Topic, error) {
+    ps, _ := pubsub.NewGossipSub(ctx, h)
+    topic, _ := ps.Join(topicName)
+    sub, _ := topic.Subscribe()
 
-func StartPubSub(ctx context.Context, h host.Host, topicName string) (*pubsub.Topic, error) {
-	// 1. Создаем движок GossipSub
-	ps, err := pubsub.NewGossipSub(ctx, h)
-	if err != nil {
-		return nil, err
-	}
+    go func() {
+        mn := &MarketNode{Host: h, Topic: topic, Ledger: l, Ctx: ctx}
+        for {
+            msg, err := sub.Next(ctx)
+            if err != nil { return }
+            if msg.ReceivedFrom == h.ID() { continue }
 
-	// 2. Входим в топик (комнату рынка)
-	topic, err := ps.Join(topicName)
-	if err != nil {
-		return nil, err
-	}
+            var m NodeMessage
+            if err := json.Unmarshal(msg.Data, &m); err != nil { continue }
 
-	// 3. Подписываемся на сообщения
-	sub, err := topic.Subscribe()
-	if err != nil {
-		return nil, err
-	}
-
-	// 4. Запускаем "Слушателя" в фоновом потоке
-	go func() {
-		for {
-			msg, err := sub.Next(ctx) // Ждем пакет из сети
-			if err != nil {
-				return // Контекст закрыт или ошибка
-			}
-
-			// Пропускаем свои же сообщения
-			if msg.ReceivedFrom == h.ID() {
-				continue
-			}
-
-			// Распаковываем JSON
-			var m NodeMessage
-			if err := json.Unmarshal(msg.Data, &m); err != nil {
-				continue // Мусор игнорируем
-			}
-
-			// Атом вывода: теперь мы видим, что делают другие
-			fmt.Printf("\n[GOSSIP] От: %s | Лот: %s | T: %d | R: %d\n", 
-				m.PeerID[:8], m.LotID, m.T, m.R)
-		}
-	}()
-
-	return topic, nil
+            // ПЕРЕДАЕМ УПРАВЛЕНИЕ СТРАТЕГУ
+            // Он сам решит: обновить Ledger или нажать на курок
+            s.HandleMessage(ctx, mn, m, bearer, number)
+        }
+    }()
+    return topic, nil
 }
 func GetPrivateKey(path string) (crypto.PrivKey, error) {
     if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -199,4 +195,43 @@ func GetPrivateKey(path string) (crypto.PrivKey, error) {
     data, _ := os.ReadFile(path)
     seed, _ := hex.DecodeString(string(data))
     return crypto.UnmarshalEd25519PrivateKey(seed)
+}
+
+// RegisterProxyHandler — настраивает ноду на роль "Посредника"
+func (mn *MarketNode) RegisterProxyHandler() {
+	// Мы говорим хосту: "Если кто-то обратится по этому ID протокола — запусти эту функцию"
+	mn.Host.SetStreamHandler(ProtocolProxy, func(stream network.Stream) {
+		defer stream.Close()
+
+		// 1. Подключаемся к реальному API Tele2
+		// Мы используем net.Dial, потому что это выход из P2P-сети в обычный интернет
+		conn, err := net.DialTimeout("tcp", "api.t2.ru:443", 10*time.Second)
+		if err != nil {
+			fmt.Printf("[ПРОКСИ] Ошибка соединения с T2: %v\n", err)
+			stream.Reset()
+			return
+		}
+		defer conn.Close()
+
+		// 2. Запускаем двустороннее копирование байтов (Туннель)
+		errCh := make(chan error, 2)
+
+		// Поток А: От соседа к серверу T2
+		go func() {
+			_, err := io.Copy(conn, stream)
+			errCh <- err
+		}()
+
+		// Поток Б: От сервера T2 обратно соседу (ответ)
+		go func() {
+			_, err := io.Copy(stream, conn)
+			errCh <- err
+		}()
+
+		// Ждем, пока одна из сторон не закроет соединение
+		err = <-errCh
+		if err != nil {
+			// Это нормальная ситуация, когда выстрел завершен
+		}
+	})
 }
