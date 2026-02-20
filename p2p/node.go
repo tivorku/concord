@@ -8,8 +8,8 @@ import (
 	"time"
 	"os"
 	"fmt"
-	"runtime"
-	"strings"
+	//"runtime"
+	//"strings"
 	"encoding/json"
 	
 	"github.com/libp2p/go-libp2p"
@@ -22,17 +22,21 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
-	"github.com/wlynxg/anet"
+	//"github.com/wlynxg/anet"
+	tcp "github.com/libp2p/go-libp2p/p2p/transport/tcp"
+	quic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
 const ProtocolProxy protocol.ID = "/mdn/proxy/1.0.0"
 type NodeMessage struct {
 	Type   string `json:"type"`   // ANNOUNCE, ROCKET_FIRED, TOP_STATUS
 	LotID  string `json:"lot_id"` // ID лота из Т2
-	PeerID string `json:"peer_id"`// ID отправителя (ноды)
+	PeerID peer.ID `json:"peer_id"`// ID отправителя (ноды)
 	T      int64  `json:"t"`      // Твои тики (время в топе)
 	R      int    `json:"r"`      // Твои ракеты
 	JoinedAt int64 `json:"joined_at"`
+	LastTopTick int64 `json:"last_top_tick"`
+	GlobalTick int64 `json:"global_tick"`
 	IsBot  bool   `json:"is_bot"`
 }
 type MarketNode struct {
@@ -47,60 +51,27 @@ type MarketNode struct {
 func InitHost(ctx context.Context, privKey crypto.PrivKey) (host.Host, error) {
     var h host.Host
     var err error
-    if runtime.GOOS == "android" {
-        l, _ := net.Listen("tcp4", "0.0.0.0:0")
-    	selectedPort := fmt.Sprintf("%d", l.Addr().(*net.TCPAddr).Port)
-    	l.Close() 
-    
-    
-    	var myAddrs []multiaddr.Multiaddr
-    	ifaces, _ := anet.InterfaceAddrs()
-    	for _, a := range ifaces {
-    		raw := a.String()
-    		ip := strings.Split(raw, "/")[0]
-    		if ip == "127.0.0.1" || strings.Contains(ip, ":") || !strings.Contains(ip, ".") {
-    			continue
-    		}
-    
-    		// Внутри твоего цикла по интерфейсам
-            mTCP, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%s", ip, selectedPort))
-            if err == nil {
-                myAddrs = append(myAddrs, mTCP)
-            }
-            
-            // Добавь это для скорости и стабильности
-            mQUIC, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/udp/%s/quic-v1", ip, selectedPort))
-            if err == nil {
-                myAddrs = append(myAddrs, mQUIC)
-            }
-    		
-    	}
-    	h, err = libp2p.New(
-    		libp2p.Identity(privKey),
-    		libp2p.ListenAddrs(myAddrs...),
-    		libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
-    			return myAddrs
-    		}),
-    		libp2p.NATPortMap(),
-    		libp2p.EnableNATService(),
-    		libp2p.EnableHolePunching(),
-    		libp2p.EnableAutoRelayWithStaticRelays(dht.GetDefaultBootstrapPeerAddrInfos()),
-    	)
-	} else {
-	    h, err = libp2p.New(
-    		libp2p.Identity(privKey),
-    		libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/0", "/ip4/0.0.0.0/udp/0/quic-v1"),
-    		libp2p.NATPortMap(),
-    		libp2p.EnableNATService(),
-    		libp2p.EnableHolePunching(),
-    		libp2p.EnableAutoRelayWithStaticRelays(dht.GetDefaultBootstrapPeerAddrInfos()),
-	    )
-	}
-
+    relayAddr, _ := multiaddr.NewMultiaddr("/ip4/144.31.152.128/tcp/4001/p2p/12D3KooWQh5pNBQRB9P6zoZwBgpwtCyTGepEKdorKoiXUpGyYuoQ")
+    info, _ := peer.AddrInfoFromP2pAddr(relayAddr)
+    h, err = libp2p.New(
+		libp2p.Identity(privKey),
+		libp2p.EnableRelay(),
+		libp2p.EnableHolePunching(),
+		libp2p.NATPortMap(),
+		libp2p.EnableAutoNATv2(),
+		libp2p.ForceReachabilityPrivate(),
+        libp2p.Transport(tcp.NewTCPTransport),
+        libp2p.Transport(quic.NewTransport),
+        libp2p.ListenAddrStrings(
+            "/ip4/0.0.0.0/tcp/0",         // Для TCP
+            "/ip4/0.0.0.0/udp/0/quic-v1", // Для QUIC (UDP)
+        ),
+		libp2p.EnableAutoRelayWithStaticRelays([]peer.AddrInfo{*info}),
+    )
 	return h, err
 }
 func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) *dht.IpfsDHT {
-
+    
 	kad, err := dht.New(ctx, h, dht.Mode(dht.ModeClient))
 	if err != nil {
 		panic(err)
@@ -114,13 +85,13 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) *dht.Ip
 	// 3. Подключаемся к стандартным бутстрап-узлам
 	for _, addr := range dht.DefaultBootstrapPeers {
 		pi, _ := peer.AddrInfoFromP2pAddr(addr)
-		/*if err != nil {
+		if err != nil {
 		    fmt.Println(err)
-		}*/
+		}
 		err = h.Connect(ctx, *pi) // Соединяемся с "гигантами" сети
-		/*if err != nil {
+		if err != nil {
 		    fmt.Println(err)
-		}*/
+		}
 	}
 
 	// 4. Объявляем о себе и ищем других

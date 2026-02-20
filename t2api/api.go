@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	//"strings"
-	"net/http/httputil" // Добавь 
+	//"net/http/httputil" // Добавь 
 	"time"
+	"io"
+	//"net"
+	//"crypto/tls"
+	
 )
-
 type LotInfo struct {
 	ID    string
 	IsBot bool
@@ -39,7 +42,6 @@ type T2LotsResponse struct {
 		CreationDate string `json:"creationDate"`
 	} `json:"data"`
 }
-
 var emojiMap = map[string]string{
 	"devil":  "😈",
 	"cool":   "😎",
@@ -50,16 +52,15 @@ var emojiMap = map[string]string{
 	"tongue": "😛",
 	"bomb":   "💣",
 }
-// GetTop4IDs делает анонимный запрос и детектирует ботов по флагу "my"
 func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
-	url := fmt.Sprintf("https://api.t2.ru/api/subscribers/7%s/exchange/lots/created", number)
+	url := fmt.Sprintf("https://yar.t2.ru/api/subscribers/7%s/exchange/lots/created", number)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Authorization", bearer)
 	req.Header.Set("Tele2-User-Agent", "mytele2-app/6.19.0")
 	req.Header.Set("X-API-Version", "2")
 	req.Header.Set("User-Agent", "okhttp/4.12.0")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := sharedClient.Do(req)
 	if err != nil {
 		return "", 0, 0, err
 	}
@@ -139,36 +140,70 @@ func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
 	fmt.Printf("[MDN] Выбран лот: %s (%d ГБ)\n", target.id, target.vol)
 	return target.id, target.vol, target.amount, nil
 }
-func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
-	url := fmt.Sprintf("https://api.t2.ru/api/exchange/lots?trafficType=data&volume=%d&cost=%d&limit=4", volume, cost)
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("Tele2-User-Agent", "mytele2-app/6.19.0")
-	req.Header.Set("User-Agent", "okhttp/4.12.0")
 
-	resp, err := http.DefaultClient.Do(req)
+
+// GetTop4IDs — итоговая функция
+func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
+	url := fmt.Sprintf("https://yar.t2.ru/api/exchange/lots?trafficType=data&volume=%d&cost=%d&limit=4", volume, cost)
+	
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
+
+	// Устанавливаем заголовки ТОЧНО как в рабочем скрипте
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Tele2-User-Agent", "mytele2-app/6.19.0")
+	req.Header.Set("User-Agent", "okhttp/4.12.0")
+
+	resp, err := sharedClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка запроса: %v", err)
+	}
 	defer resp.Body.Close()
 
+	// Читаем тело ответа для анализа
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка чтения тела: %v", err)
+	}
+
+	// Если сервер всё равно вернул не 200, выводим что именно не так
+	if resp.StatusCode != http.StatusOK {
+		snippet := string(body)
+		if len(snippet) > 200 {
+			snippet = snippet[:200]
+		}
+		return nil, fmt.Errorf("сервер вернул %d. Тело: %s", resp.StatusCode, snippet)
+	}
+
+	// Декодируем JSON
 	var res struct {
 		Data []struct {
 			ID string `json:"id"`
 			My bool   `json:"my"`
 		} `json:"data"`
 	}
-	json.NewDecoder(resp.Body).Decode(&res)
+
+	if err := json.Unmarshal(body, &res); err != nil {
+		return nil, fmt.Errorf("ошибка декодирования JSON: %v. Тело: %s", err, string(body[:50]))
+	}
+
+	if len(res.Data) == 0 {
+		return nil, fmt.Errorf("лоты не найдены")
+	}
 
 	var results []LotInfo
 	for _, lot := range res.Data {
 		results = append(results, LotInfo{ID: lot.ID, IsBot: lot.My})
 	}
+
 	return results, nil
 }
 
 // Rocket выполняет поднятие лота. Поддерживает прокси-клиент.
 func Rocket(client *http.Client, bearer, number, lotID string) error {
-	url := fmt.Sprintf("https://api.t2.ru/api/subscribers/7%s/exchange/lots/premium", number)
+	url := fmt.Sprintf("https://yar.t2.ru/api/subscribers/7%s/exchange/lots/premium", number)
 	jsonData := []byte(fmt.Sprintf(`{"lotId":"%s"}`, lotID))
 	req, _ := http.NewRequest("PUT", url, bytes.NewBuffer(jsonData))
 	req.Header.Set("Authorization", bearer)
@@ -176,7 +211,7 @@ func Rocket(client *http.Client, bearer, number, lotID string) error {
 	req.Header.Set("Tele2-User-Agent", "mytele2-app/6.19.0")
 	req.Header.Set("User-Agent", "okhttp/4.12.0")
 	req.Header.Set("X-API-Version", "2")
-
+    
 	resp, err := client.Do(req)
 	if err != nil {
 		return err

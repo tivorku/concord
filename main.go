@@ -11,7 +11,9 @@ import (
 	"os"
 	"runtime"
 	"strings"
-//	"time"
+	"strconv"
+	"math/rand/v2"
+	"time"
 )
 
 func main() {
@@ -27,11 +29,18 @@ func main() {
 
 	// 2. Авторизация и параметры (Твои функции из t2api)
 	bearer, number := t2api.Login() // Вход по СМС или из файла
-	myLotID, volume, value, err := t2api.ShowAndSelectLot(bearer, number)
-	if err != nil {
+	//myLotID, volume, value, err := t2api.ShowAndSelectLot(bearer, number)
+	min := int64(10_000_000_000_000_000)
+	max := int64(100_000_000_000_000_000)
+	
+	myLotID := strconv.Itoa(int(rand.Int64N(max-min) + min))
+	var (
+	    volume int = 1
+	    value int = 15
+	)
+	/*if err != nil {
 	    fmt.Println(err)
-	}
-    //fmt.Println("Лот выбрался сам")
+	}*/
 	// 3. Создание сетевого узла
 	privKey, _ := p2p.GetPrivateKey("identity.key")
 	h, err := p2p.InitHost(ctx, privKey)
@@ -39,9 +48,11 @@ func main() {
 		fmt.Printf("[ОШИБКА] Хост: %v\n", err)
 		return
 	}
+	now := time.Now().Unix()
+    myLedger.Update(myLotID, h.ID(), 0, 0, now, 0, 0) 
 
 	// 4. Настройка скрытого протокола
-	rendezvous := GetProtocolID(fmt.Sprintf("%v-%v", volume, value), "thiztoolisverypowehfull")
+	rendezvous := GetProtocolID(fmt.Sprintf("%d-%d", volume, value), "thiztoolisverypowehfull")
 	fmt.Printf("[MDN] Вход в сегмент: %s\n", rendezvous)
 
 	// 5. Запуск поиска соседей и регистрации прокси
@@ -49,16 +60,38 @@ func main() {
 	// Важно: регистрируем возможность быть прокси для других
 	mn := &p2p.MarketNode{Host: h, Ledger: myLedger, Ctx: ctx}
 	mn.RegisterProxyHandler()
-
 	// 6. Инициализация Стратега
 	strat := p2p.NewStrategist(myLedger, myLotID, volume, value)
 
 	// 7. Запуск рации (PubSub)
 	topic, _ := p2p.StartPubSub(ctx, h, rendezvous, myLedger, strat, bearer, number)
 	mn.Topic = topic
-
+    /*go func() {
+        for {
+            fmt.Println("\nТекущие адреса:")
+                for _, addr := range h.Addrs() {
+                    fmt.Println(addr)
+                }
+            time.Sleep(10 * time.Second)
+        }
+    }()*/
 	// 8. Фоновые задачи Стратега (Анонсы и Дежурство)
 	go strat.Run(ctx, mn, bearer, number)
+	go func() {
+        for {
+            select {
+            case <-ctx.Done():
+                return
+            default:
+                // Вызываем функцию отрисовки
+                strat.ShowDashboard()
+                
+                // Обновляем экран раз в 2-5 секунд
+                // Слишком часто (раз в 0.1 сек) нельзя - будет мерцать экран
+                time.Sleep(2 * time.Second) 
+            }
+        }
+    }()
 
 	fmt.Printf("[MDN] Работаем! Мой PeerID: %s\n", h.ID().String()[len(h.ID().String())-8:])
 	select {}

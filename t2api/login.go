@@ -14,25 +14,25 @@ type Data struct {
 	Refresh string `json:"refresh_token"`
 }
 var (
-
+    
 	number, sms_code string
 	data Data
 	bearer_url = fmt.Sprintf("https://sso.t2.ru/auth/realms/tele2-b2c/protocol/openid-connect/token")
 )
 func RequestSms(number string) string {
-	sms_url := fmt.Sprintf("https://api.t2.ru/api/validation/number/7%s", number)
+	sms_url := fmt.Sprintf("https://yar.t2.ru/api/validation/number/7%s", number)
 	payload := map[string]string{"sender": "Tele2"}
 	jsondata, _ := json.Marshal(payload)
 	request, err := http.NewRequest("POST", sms_url, bytes.NewBuffer(jsondata))
 	if err != nil {
 		fmt.Println(err)
 	}
-	request.Header.Set("Tele2-User-Agent", "mytele2-app/6.18.0")
+	request.Header.Set("Tele2-User-Agent", "mytele2-app/6.19.0")
 	request.Header.Set("User-Agent", "okhttp/4.12.0")
 	request.Header.Set("Content-Type", "application/json; charset=UTF-8")
 	request.Header.Set("X-API-Version", "1")
 	request.Header.Set("Content-Length", "18")
-	response, err := client.Do(request)
+	response, err := sharedClient.Do(request)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -57,7 +57,7 @@ func RequestBearer(number, sms_code string) (string, string) {
 	request.Header.Set("Tele2-User-Agent", "mytele2-app/6.19.0")
 	request.Header.Set("User-Agent", "okhttp/4.12.0")
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	response, err := client.Do(request)
+	response, err := sharedClient.Do(request)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -81,7 +81,7 @@ func GetTokens(refresh string) (string, string, error) {
 	request.Header.Set("Tele2-User-Agent", "mytele2-app/6.19.0")
 	request.Header.Set("User-Agent", "okhttp/4.12.0")
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	response, err := client.Do(request)
+	response, err := sharedClient.Do(request)
 	if err != nil {
 		fmt.Println(err)
 		return "", "", err

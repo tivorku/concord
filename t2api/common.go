@@ -2,21 +2,51 @@ package t2api
 import (
     "net/http"
     "time"
+    "net"
+    utls "github.com/refraction-networking/utls"
+    "crypto/tls"
 )
 var (
     yes_reset = map[string]bool{"yes": true, "ye": true, "y": true}
 	no = map[string]bool{"no": true, "n": true}
 	no_reset = map[string]bool{"": true, "no": true, "n": true}
 	yes = map[string]bool{"": true, "yes": true, "ye": true, "y": true}
-	client = &http.Client{
-	    Timeout: 20 * time.Second,
+	sharedClient *http.Client
+)
+func init() {
+	// Создаем кастомный DialTLS для имитации реального устройства (Android/Chrome)
+	dialTLS := func(network, addr string) (net.Conn, error) {
+		conn, err := net.DialTimeout(network, addr, 10*time.Second)
+		if err != nil {
+			return nil, err
+		}
+
+		// Создаем UClient, который мимикрирует под Chrome или Android.
+		// Cloudflare доверяет этим отпечаткам гораздо больше, чем стандартному Go.
+		config := &utls.Config{
+			ServerName: "yar.t2.ru",
+			NextProtos: []string{"http/1.1"}, 
+		}
+		
+		uConn := utls.UClient(conn, config, utls.HelloAndroid_11_OkHttp) // Мимикрируем под Android 11
+		
+		if err := uConn.Handshake(); err != nil {
+			uConn.Close()
+			return nil, err
+		}
+		return uConn, nil
+	}
+
+	sharedClient = &http.Client{
+		Timeout: 20 * time.Second,
 		Transport: &http.Transport{
-			MaxIdleConns:          1000,
-			DisableCompression:    false,
-			ExpectContinueTimeout: 0,
-			DisableKeepAlives:     false,
-			MaxIdleConnsPerHost:   1000,
-			IdleConnTimeout:       1 * time.Hour,
+			DialTLS:             dialTLS,
+			MaxIdleConns:        10,
+			IdleConnTimeout:     90 * time.Second,
+			// Принудительно отключаем HTTP/2, так как в Go он палится на отпечатках
+			TLSNextProto:        make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
+			ForceAttemptHTTP2:   false,
+			DisableCompression:  false, // Обязательно false (ждем gzip)
 		},
 	}
-)
+}

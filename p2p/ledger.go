@@ -16,12 +16,15 @@ type Participant struct {
 	PeerID    peer.ID
 	T         int64
 	R         int
+	LastTopTick int64
+	GlobalTick int64
 	JoinedAt  int64 // Добавляем дату первого появления
 	LastSeen  time.Time
 }
 // Ledger — это общая память "картеля". 
 // Каждая нода хранит свою копию этой структуры.
 type Ledger struct {
+    GlobalTick int64
 	mu      sync.RWMutex            // "Замок" для безопасной работы из разных потоков
 	Members map[string]*Participant // Карта всех лотов: ключ — это LotID
 }
@@ -33,7 +36,7 @@ func NewLedger() *Ledger {
 		Members: make(map[string]*Participant),
 	}
 }
-func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR int, joinedAt int64) {
+func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR int, joinedAt int64, lastTopTick int64, incomingTick int64) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -42,18 +45,16 @@ func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR in
 	// Если лот новый
 	if !exists {
 		// Небольшая проверка: JoinedAt не может быть в будущем
-		now := time.Now().Unix()
-		if joinedAt > now {
-			joinedAt = now
-		}
 
 		l.Members[lotID] = &Participant{
 			LotID:    lotID,
 			PeerID:   pID,
 			T:        incomingT,
 			R:        incomingR,
-			JoinedAt: joinedAt, // Верим анонсу ноды
+			LastTopTick: lastTopTick,
+			JoinedAt: joinedAt,
 			LastSeen: time.Now(),
+			GlobalTick: incomingTick,
 		}
 		return
 	}
@@ -61,6 +62,13 @@ func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR in
 	// Если лот старый, но пришел более "молодой"JoinedAt (кто-то пытается обмануть возраст)
 	if joinedAt > p.JoinedAt {
 		p.JoinedAt = joinedAt // Обновляем на более актуальное (безопасное) время
+	}
+	// Если у соседа счетчик больше — подтягиваемся за ним
+    if incomingTick > l.GlobalTick {
+        l.GlobalTick = incomingTick
+    }
+	if lastTopTick > p.LastTopTick {
+	    p.LastTopTick = lastTopTick
 	}
 
 	// Синхронизация T и R (твой принцип максимума)
@@ -82,24 +90,45 @@ func (l *Ledger) GetSortedQueue() []string {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
-	now := time.Now().Unix()
+	//now := time.Now().Unix()
 	var activeItems []Item
 
 	for id, p := range l.Members {
 		// 1. Игнорируем тех, кто молчит дольше 2 минут (оффлайн)
-		if time.Since(p.LastSeen) > 2*time.Minute {
+		if time.Since(p.LastSeen) > 5*time.Minute {
 			continue
 		}
 
 		// 2. Считаем базовый приоритет по твоей формуле
-		priority := float64(p.T) / float64(p.R+1)
+
+    	// 1. Рассчитываем W (Wait Time) — Труд в очереди
+    	// Если лот еще ни разу не был в топе, используем время JoinedAt
+    	lastActivity := p.LastTopTick
+    	if lastActivity == 0 {
+    		lastActivity = p.JoinedAt
+    	}
+    
+    	waitTime := float64(p.GlobalTick - lastActivity)
+    	if waitTime < 1 {
+    		waitTime = 1 // Защита от деления на 0
+    	}
+    
+    	// 2. Рассчитываем Индекс Сытости (Satiety)
+    	// T — обычные циклы, R — ракеты (вес 1.2)
+    	satiety := float64(p.T) + (float64(p.R) * 1.2) + 1.0
+    
+    	// 3. Итоговая формула MDN Equilibrium
+    	// P = (S^2) / W
+    	// Победит тот, у кого число будет САМЫМ МАЛЕНЬКИМ
+    	priority := (satiety * satiety) / waitTime + 1.0
+    
 
 		// 3. ПРОВЕРКА НА КАРАНТИН (1200 секунд = 20 минут)
-		if now-p.JoinedAt < 1200 {
+		/*if now-p.JoinedAt < 1200 {
 			// Если нода молодая — выкидываем её в самый конец очереди,
 			// прибавляя к приоритету огромное число.
 			priority += 1000000.0
-		}
+		}*/
 
 		activeItems = append(activeItems, Item{
 			LotID:    id,
@@ -127,7 +156,6 @@ func (l *Ledger) GetSortedQueue() []string {
 	result := make([]string, len(activeItems))
 	for i, item := range activeItems {
 		result[i] = item.LotID
-		fmt.Println(result[i])
 	}
 	return result
 }
@@ -136,7 +164,6 @@ func (l *Ledger) StartJanitor(ctx context.Context) {
 	// Будем проверять список раз в минуту
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -150,7 +177,7 @@ func (l *Ledger) StartJanitor(ctx context.Context) {
 
 			for id, p := range l.Members {
 				// Если мы не слышали о ноде больше 2 минут — она ушла из сети
-				if now.Sub(p.LastSeen) > 2*time.Minute {
+				if now.Sub(p.LastSeen) > 5*time.Minute {
 					delete(l.Members, id)
 				}
 			}
