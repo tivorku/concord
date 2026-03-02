@@ -378,7 +378,7 @@ func (s *Strategist) HandleMessage(ctx context.Context, mn *MarketNode, m NodeMe
 func (s *Strategist) wrapWithUTLS(conn net.Conn) (net.Conn, error) {
 	// 1. Настройка параметров (SNI)
 	config := &utls.Config{
-		ServerName: "yar.t2.ru",
+		ServerName: t2api.T2Host,
 		NextProtos: []string{"http/1.1"},
 	}
 
@@ -405,6 +405,7 @@ func (s *Strategist) PerformExecution(ctx context.Context, mn *MarketNode, beare
 	if time.Since(s.lastMyShotTime) < 10*time.Second {
 		s.mu.Unlock()
 		// Мы недавно стреляли. Пропускаем этот цикл, чтобы не злить антифрод.
+		fmt.Println("Уже недавно стреляли. Ждём 10 секунд")
 		return 
 	}
 	s.lastMyShotTime = time.Now() // Фиксируем попытку сразу
@@ -425,7 +426,7 @@ func (s *Strategist) PerformExecution(ctx context.Context, mn *MarketNode, beare
 
 	if proxyID == "" {
 		fmt.Println("[MDN] Соседей-прокси нет. Использую ПРЯМОЙ выстрел (риск палева IP)!")
-		client = http.DefaultClient
+		client = t2api.SharedClient
 	} else {
 		fmt.Printf("[MDN] Использую стелс-туннель через: %s\n", proxyID.String()[len(proxyID)-8:])
 		client = s.CreateProxiedClient(ctx, mn.Host, proxyID)
@@ -443,7 +444,7 @@ func (s *Strategist) PerformExecution(ctx context.Context, mn *MarketNode, beare
 		s.ledger.mu.Lock()
 		if p, ok := s.ledger.Members[s.myLotID]; ok {
 			p.R++ // Увеличиваем количество потраченных ракет
-			p.T=p.T + int64(rand.Intn(3))
+			p.T = p.T + int64(rand.Intn(3)) + 1
 			p.LastTopTick = s.ledger.GlobalTick
 			// Вещаем на всю сеть: "Я потратился, мой приоритет упал"
 			s.broadcastRocketFired(mn.Topic, mn.Host.ID(), p.T, p.R, p.JoinedAt, p.LastTopTick)

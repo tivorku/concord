@@ -5,12 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	//"strings"
-	//"net/http/httputil" // Добавь 
 	"time"
 	"io"
-	//"net"
-	//"crypto/tls"
 	
 )
 type LotInfo struct {
@@ -53,14 +49,14 @@ var emojiMap = map[string]string{
 	"bomb":   "💣",
 }
 func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
-	url := fmt.Sprintf("https://yar.t2.ru/api/subscribers/7%s/exchange/lots/created", number)
+	url := fmt.Sprintf("https://%s/api/subscribers/7%s/exchange/lots/created", T2Host, number)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Authorization", bearer)
-	req.Header.Set("Tele2-User-Agent", "mytele2-app/6.19.0")
+	req.Header.Set("Tele2-User-Agent", AppVersion)
 	req.Header.Set("X-API-Version", "2")
-	req.Header.Set("User-Agent", "okhttp/4.12.0")
+	req.Header.Set("User-Agent", OkHttpVersion)
 
-	resp, err := sharedClient.Do(req)
+	resp, err := SharedClient.Do(req)
 	if err != nil {
 		return "", 0, 0, err
 	}
@@ -87,9 +83,6 @@ func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
 
 	for i := len(res.Data) - 1; i >= 0; i-- {
 		lot := res.Data[i]
-
-		// Лог для отладки каждого лота
-		// fmt.Printf("[DEBUG] Лот %s: статус=%s, дата=%s\n", lot.ID, lot.Status, lot.CreationDate)
 
 		if lot.Status != "active" {
 			continue
@@ -120,11 +113,9 @@ func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
 	}
 
 	if len(selectable) == 0 {
-		return "", 0, 0, fmt.Errorf("активные лоты не найдены. Создайте лот на Маркете вручную")
+		return "", 0, 0, fmt.Errorf("Активные лоты не найдены. Создайте лот на Маркете вручную.")
 	}
 
-	// На Android fmt.Scanln может "проглатывать" ввод, если в буфере остался перевод строки.
-	// Используем более надежный способ чтения для Termux:
 	fmt.Print("\nВыберите номер лота: ")
 	var choice int
 	_, err = fmt.Scanf("%d\n", &choice) 
@@ -144,7 +135,7 @@ func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
 
 // GetTop4IDs — итоговая функция
 func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
-	url := fmt.Sprintf("https://yar.t2.ru/api/exchange/lots?trafficType=data&volume=%d&cost=%d&limit=4", volume, cost)
+	url := fmt.Sprintf("https://%s/api/exchange/lots?trafficType=data&volume=%d&cost=%d&limit=4", T2Host, volume, cost)
 	
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -153,10 +144,10 @@ func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
 
 	// Устанавливаем заголовки ТОЧНО как в рабочем скрипте
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Tele2-User-Agent", "mytele2-app/6.19.0")
-	req.Header.Set("User-Agent", "okhttp/4.12.0")
+	req.Header.Set("Tele2-User-Agent", AppVersion)
+	req.Header.Set("User-Agent", OkHttpVersion)
 
-	resp, err := sharedClient.Do(req)
+	resp, err := SharedClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка запроса: %v", err)
 	}
@@ -203,13 +194,13 @@ func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
 
 // Rocket выполняет поднятие лота. Поддерживает прокси-клиент.
 func Rocket(client *http.Client, bearer, number, lotID string) error {
-	url := fmt.Sprintf("https://yar.t2.ru/api/subscribers/7%s/exchange/lots/premium", number)
+	url := fmt.Sprintf("https://%s/api/subscribers/7%s/exchange/lots/premium", T2Host, number)
 	jsonData := []byte(fmt.Sprintf(`{"lotId":"%s"}`, lotID))
 	req, _ := http.NewRequest("PUT", url, bytes.NewBuffer(jsonData))
 	req.Header.Set("Authorization", bearer)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Tele2-User-Agent", "mytele2-app/6.19.0")
-	req.Header.Set("User-Agent", "okhttp/4.12.0")
+	req.Header.Set("Tele2-User-Agent", AppVersion)
+	req.Header.Set("User-Agent", OkHttpVersion)
 	req.Header.Set("X-API-Version", "2")
     
 	resp, err := client.Do(req)

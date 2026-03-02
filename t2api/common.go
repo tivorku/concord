@@ -11,7 +11,14 @@ var (
 	no = map[string]bool{"no": true, "n": true}
 	no_reset = map[string]bool{"": true, "no": true, "n": true}
 	yes = map[string]bool{"": true, "yes": true, "ye": true, "y": true}
-	sharedClient *http.Client
+	SharedClient *http.Client
+)
+const (
+    // Названия с Большой буквы — они видны всему проекту
+    AppVersion    = "mytele2-app/6.35.0"
+    OkHttpVersion = "okhttp/4.0.12"
+    T2Host        = "yar.t2.ru"
+    T2FullHost    = "yar.t2.ru:443"
 )
 func init() {
 	// Создаем кастомный DialTLS для имитации реального устройства (Android/Chrome)
@@ -24,7 +31,7 @@ func init() {
 		// Создаем UClient, который мимикрирует под Chrome или Android.
 		// Cloudflare доверяет этим отпечаткам гораздо больше, чем стандартному Go.
 		config := &utls.Config{
-			ServerName: "yar.t2.ru",
+			ServerName: T2Host,
 			NextProtos: []string{"http/1.1"}, 
 		}
 		
@@ -37,7 +44,7 @@ func init() {
 		return uConn, nil
 	}
 
-	sharedClient = &http.Client{
+	SharedClient = &http.Client{
 		Timeout: 20 * time.Second,
 		Transport: &http.Transport{
 			DialTLS:             dialTLS,
@@ -46,7 +53,6 @@ func init() {
 			// Принудительно отключаем HTTP/2, так как в Go он палится на отпечатках
 			TLSNextProto:        make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
 			ForceAttemptHTTP2:   false,
-			DisableCompression:  false, // Обязательно false (ждем gzip)
 		},
 	}
 }

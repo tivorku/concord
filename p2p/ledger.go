@@ -4,7 +4,6 @@ import (
 	"sync"
 	"time"
 	"sort"
-    "fmt"
     "context"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
@@ -173,7 +172,7 @@ func (l *Ledger) StartJanitor(ctx context.Context) {
 			l.mu.Lock() // Запираем на время уборки
 			
 			now := time.Now()
-			countBefore := len(l.Members)
+			//countBefore := len(l.Members)
 
 			for id, p := range l.Members {
 				// Если мы не слышали о ноде больше 2 минут — она ушла из сети
@@ -181,12 +180,6 @@ func (l *Ledger) StartJanitor(ctx context.Context) {
 					delete(l.Members, id)
 				}
 			}
-
-			countAfter := len(l.Members)
-			if countBefore != countAfter {
-				fmt.Printf("[LEDGER] Уборка завершена: удалено %d оффлайн-нод\n", countBefore-countAfter)
-			}
-			
 			l.mu.Unlock() // Отпираем
 		}
 	}

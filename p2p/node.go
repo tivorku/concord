@@ -12,6 +12,7 @@ import (
 	//"strings"
 	"encoding/json"
 	
+	"market-denet/t2api"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
@@ -51,7 +52,7 @@ type MarketNode struct {
 func InitHost(ctx context.Context, privKey crypto.PrivKey) (host.Host, error) {
     var h host.Host
     var err error
-    relayAddr, _ := multiaddr.NewMultiaddr("/ip4/144.31.152.128/tcp/4001/p2p/12D3KooWQh5pNBQRB9P6zoZwBgpwtCyTGepEKdorKoiXUpGyYuoQ")
+    relayAddr, _ := multiaddr.NewMultiaddr("/ip4/144.31.152.128/tcp/4001/p2p/12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N")
     info, _ := peer.AddrInfoFromP2pAddr(relayAddr)
     h, err = libp2p.New(
 		libp2p.Identity(privKey),
@@ -70,13 +71,22 @@ func InitHost(ctx context.Context, privKey crypto.PrivKey) (host.Host, error) {
     )
 	return h, err
 }
+
 func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) *dht.IpfsDHT {
+
+    relayAddr, _ := multiaddr.NewMultiaddr("/ip4/144.31.152.128/tcp/4001/p2p/12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N")
+    relayInfo, _ := peer.AddrInfoFromP2pAddr(relayAddr)
+    err := h.Connect(ctx, *relayInfo)
+    if err == nil {
+        authenticateAtRelay(ctx, h, relayInfo.ID)
+    }
     
-	kad, err := dht.New(ctx, h, dht.Mode(dht.ModeClient))
+	kad, err := dht.New(ctx, h, dht.Mode(dht.ModeClient), dht.BootstrapPeers(*relayInfo))
 	if err != nil {
 		panic(err)
 	}
-
+    
+    // 1.5. Подключаемся к нашему Маяку как к единственному Bootstrap-узлу
 	// 2. Запускаем поиск путей
 	if err = kad.Bootstrap(ctx); err != nil {
 		panic(err)
@@ -88,29 +98,31 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) *dht.Ip
 		if err != nil {
 		    fmt.Println(err)
 		}
-		err = h.Connect(ctx, *pi) // Соединяемся с "гигантами" сети
-		if err != nil {
-		    fmt.Println(err)
-		}
+		h.Connect(ctx, *pi) // Соединяемся с "гигантами" сети
 	}
 
 	// 4. Объявляем о себе и ищем других
 	routingDiscovery := routing.NewRoutingDiscovery(kad)
-	
 	// Горутина для "объявления" нас в сети
 	util.Advertise(ctx, routingDiscovery, rendezvous)
 
 	// Цикл поиска соседей
 	go func() {
 		for {
+		    // В цикле дебага
+           /* conns := h.Network().Conns()
+            fmt.Printf("[DEBUG] Всего сетевых соединений: %d\n", len(conns))
+            for _, c := range conns {
+            fmt.Printf("   -> Соединен с: %s\n", c.RemotePeer().String())
+            }*/
 			peersChan, err := routingDiscovery.FindPeers(ctx, rendezvous)
 			if err != nil {
 				return
 			}
 
-			for p := range peersChan {
+            for p := range peersChan {
                 if p.ID == h.ID() { continue }
-                
+                if h.Network().Connectedness(p.ID) == network.Connected { continue }
                 // Запускаем процесс для каждого соседа в отдельном потоке
                 go func(peerInfo peer.AddrInfo) {
                     // 1. Если адресов нет - ищем их
@@ -121,11 +133,9 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) *dht.Ip
                     }
                     
                     // 2. Подключаемся
-                    if h.Network().Connectedness(peerInfo.ID) != network.Connected {
-                        err := h.Connect(ctx, peerInfo)
-                        if err == nil {
-                            fmt.Println("Найден сосед: ", peerInfo.ID)
-                        }
+                    err := h.Connect(ctx, peerInfo)
+                    if err == nil {
+                        fmt.Println("Найден сосед: ", peerInfo.ID)
                     }
                 }(p) // Передаем переменную p в горутину
             }
@@ -135,22 +145,21 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) *dht.Ip
 	return kad
 }
 func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, s *Strategist, bearer, number string) (*pubsub.Topic, error) {
-    ps, _ := pubsub.NewGossipSub(ctx, h)
+    ps, _ := pubsub.NewGossipSub(ctx, h, pubsub.WithFloodPublish(true), pubsub.WithDirectConnectTicks(1))
     topic, _ := ps.Join(topicName)
     sub, _ := topic.Subscribe()
-
+    
     go func() {
+        
         mn := &MarketNode{Host: h, Topic: topic, Ledger: l, Ctx: ctx}
         for {
+            //fmt.Printf("[DEBUG-PUBSUB] Соседей в топике %s: %d\n", topicName, len(topic.ListPeers()))
             msg, err := sub.Next(ctx)
             if err != nil { return }
             if msg.ReceivedFrom == h.ID() { continue }
 
             var m NodeMessage
             if err := json.Unmarshal(msg.Data, &m); err != nil { continue }
-
-            // ПЕРЕДАЕМ УПРАВЛЕНИЕ СТРАТЕГУ
-            // Он сам решит: обновить Ledger или нажать на курок
             s.HandleMessage(ctx, mn, m, bearer, number)
         }
     }()
@@ -176,7 +185,7 @@ func (mn *MarketNode) RegisterProxyHandler() {
 
 		// 1. Подключаемся к реальному API Tele2
 		// Мы используем net.Dial, потому что это выход из P2P-сети в обычный интернет
-		conn, err := net.DialTimeout("tcp", "api.t2.ru:443", 10*time.Second)
+		conn, err := net.DialTimeout("tcp", t2api.T2FullHost, 10*time.Second)
 		if err != nil {
 			fmt.Printf("[ПРОКСИ] Ошибка соединения с T2: %v\n", err)
 			stream.Reset()
@@ -205,4 +214,27 @@ func (mn *MarketNode) RegisterProxyHandler() {
 			// Это нормальная ситуация, когда выстрел завершен
 		}
 	})
+}
+func authenticateAtRelay(ctx context.Context, h host.Host, relayID peer.ID) error {
+	// Открываем поток авторизации к реле
+	s, err := h.NewStream(ctx, relayID, "/mdn-private-auth/1.0.0")
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	// Отправляем пароль
+	password := "2a35442281f13052136c53589ae2f51b"
+	_, err = s.Write([]byte(password))
+	if err != nil {
+		return err
+	}
+
+	// Читаем ответ "OK"
+	buf := make([]byte, 2)
+	_, err = io.ReadFull(s, buf)
+	if string(buf) != "OK" {
+		fmt.Println("[Auth] Авторизация в реле прошла неудачно.")
+	}
+	return err
 }

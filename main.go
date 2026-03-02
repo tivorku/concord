@@ -15,7 +15,6 @@ import (
 	"math/rand/v2"
 	"time"
 )
-
 func main() {
 	if runtime.GOOS == "android" {
 		hideAndroidNetworkError()
@@ -30,6 +29,9 @@ func main() {
 	// 2. Авторизация и параметры (Твои функции из t2api)
 	bearer, number := t2api.Login() // Вход по СМС или из файла
 	//myLotID, volume, value, err := t2api.ShowAndSelectLot(bearer, number)
+	/*if err != nil {
+	    fmt.Println(err)
+	}*/
 	min := int64(10_000_000_000_000_000)
 	max := int64(100_000_000_000_000_000)
 	
@@ -38,9 +40,7 @@ func main() {
 	    volume int = 1
 	    value int = 15
 	)
-	/*if err != nil {
-	    fmt.Println(err)
-	}*/
+
 	// 3. Создание сетевого узла
 	privKey, _ := p2p.GetPrivateKey("identity.key")
 	h, err := p2p.InitHost(ctx, privKey)
@@ -52,7 +52,7 @@ func main() {
     myLedger.Update(myLotID, h.ID(), 0, 0, now, 0, 0) 
 
 	// 4. Настройка скрытого протокола
-	rendezvous := GetProtocolID(fmt.Sprintf("%d-%d", volume, value), "thiztoolisverypowehfull")
+	rendezvous := GetProtocolID(fmt.Sprintf("%d-%d", volume, value), "W2Rw_qon&lV3wxlbhFE4")
 	fmt.Printf("[MDN] Вход в сегмент: %s\n", rendezvous)
 
 	// 5. Запуск поиска соседей и регистрации прокси
@@ -66,15 +66,15 @@ func main() {
 	// 7. Запуск рации (PubSub)
 	topic, _ := p2p.StartPubSub(ctx, h, rendezvous, myLedger, strat, bearer, number)
 	mn.Topic = topic
-    /*go func() {
+    go func() {
         for {
             fmt.Println("\nТекущие адреса:")
                 for _, addr := range h.Addrs() {
                     fmt.Println(addr)
                 }
-            time.Sleep(10 * time.Second)
+            time.Sleep(3 * time.Second)
         }
-    }()*/
+    }()
 	// 8. Фоновые задачи Стратега (Анонсы и Дежурство)
 	go strat.Run(ctx, mn, bearer, number)
 	go func() {
@@ -83,17 +83,12 @@ func main() {
             case <-ctx.Done():
                 return
             default:
-                // Вызываем функцию отрисовки
                 strat.ShowDashboard()
-                
-                // Обновляем экран раз в 2-5 секунд
-                // Слишком часто (раз в 0.1 сек) нельзя - будет мерцать экран
-                time.Sleep(2 * time.Second) 
+                time.Sleep(7 * time.Second) 
             }
         }
     }()
 
-	fmt.Printf("[MDN] Работаем! Мой PeerID: %s\n", h.ID().String()[len(h.ID().String())-8:])
 	select {}
 }
 
