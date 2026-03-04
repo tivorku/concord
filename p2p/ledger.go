@@ -9,7 +9,7 @@ import (
 )
 
 // Participant — это запись об одном конкретном лоте в сети.
-// Это то, что твоя нода будет помнить о каждом конкуренте или союзнике.
+// это то, что наша нода будет помнить о каждом участнике сети.
 type Participant struct {
 	LotID     string
 	PeerID    peer.ID
@@ -17,19 +17,19 @@ type Participant struct {
 	R         int
 	LastTopTick int64
 	GlobalTick int64
-	JoinedAt  int64 // Добавляем дату первого появления
+	JoinedAt  int64
 	LastSeen  time.Time
 }
-// Ledger — это общая память "картеля". 
-// Каждая нода хранит свою копию этой структуры.
+// Ledger — это общая память сети. 
+// каждая нода хранит свою копию этой структуры.
 type Ledger struct {
     GlobalTick int64
-	mu      sync.RWMutex            // "Замок" для безопасной работы из разных потоков
-	Members map[string]*Participant // Карта всех лотов: ключ — это LotID
+	mu      sync.RWMutex
+	Members map[string]*Participant // карта всех лотов: ключ — это LotID
 }
 
 // NewLedger создает и инициализирует чистую память.
-// Вызывается один раз при старте программы.
+// вызывается один раз при старте программы.
 func NewLedger() *Ledger {
 	return &Ledger{
 		Members: make(map[string]*Participant),
@@ -40,11 +40,8 @@ func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR in
 	defer l.mu.Unlock()
 
 	p, exists := l.Members[lotID]
-	
-	// Если лот новый
-	if !exists {
-		// Небольшая проверка: JoinedAt не может быть в будущем
 
+	if !exists {
 		l.Members[lotID] = &Participant{
 			LotID:    lotID,
 			PeerID:   pID,
@@ -58,11 +55,11 @@ func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR in
 		return
 	}
 
-	// Если лот старый, но пришел более "молодой"JoinedAt (кто-то пытается обмануть возраст)
+	// если лот старый, но пришел более "молодой" JoinedAt (кто-то пытается обмануть возраст)
 	if joinedAt > p.JoinedAt {
-		p.JoinedAt = joinedAt // Обновляем на более актуальное (безопасное) время
+		p.JoinedAt = joinedAt // обновляем на более актуальное время
 	}
-	// Если у соседа счетчик больше — подтягиваемся за ним
+	// если у соседа счетчик больше — подтягиваемся за ним
     if incomingTick > l.GlobalTick {
         l.GlobalTick = incomingTick
     }
@@ -70,7 +67,7 @@ func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR in
 	    p.LastTopTick = lastTopTick
 	}
 
-	// Синхронизация T и R (твой принцип максимума)
+	// синхронизация T и R (принцип максимума)
 	if incomingT > p.T { p.T = incomingT }
 	if incomingR > p.R { p.R = incomingR }
 	
@@ -84,24 +81,18 @@ type Item struct {
 	JoinedAt int64
 }
 
-// GetSortedQueue анализирует память и выдает текущую очередь картеля.
 func (l *Ledger) GetSortedQueue() []string {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-
-	//now := time.Now().Unix()
+	
 	var activeItems []Item
 
 	for id, p := range l.Members {
-		// 1. Игнорируем тех, кто молчит дольше 2 минут (оффлайн)
-		if time.Since(p.LastSeen) > 5*time.Minute {
+		// игнорируем тех, кто молчит дольше 2 минут (оффлайн)
+		if time.Since(p.LastSeen) > 2*time.Minute {
 			continue
 		}
 
-		// 2. Считаем базовый приоритет по твоей формуле
-
-    	// 1. Рассчитываем W (Wait Time) — Труд в очереди
-    	// Если лот еще ни разу не был в топе, используем время JoinedAt
     	lastActivity := p.LastTopTick
     	if lastActivity == 0 {
     		lastActivity = p.JoinedAt
@@ -109,23 +100,22 @@ func (l *Ledger) GetSortedQueue() []string {
     
     	waitTime := float64(p.GlobalTick - lastActivity)
     	if waitTime < 1 {
-    		waitTime = 1 // Защита от деления на 0
+    		waitTime = 1 // защита от деления на 0
     	}
     
-    	// 2. Рассчитываем Индекс Сытости (Satiety)
+    	// рассчитываем satiety
     	// T — обычные циклы, R — ракеты (вес 1.2)
-    	satiety := float64(p.T) + (float64(p.R) * 1.2) + 1.0
+    	satiety := float64(p.T) + (float64(p.R) * 1.2)
     
-    	// 3. Итоговая формула MDN Equilibrium
-    	// P = (S^2) / W
-    	// Победит тот, у кого число будет САМЫМ МАЛЕНЬКИМ
-    	priority := (satiety * satiety) / waitTime + 1.0
+    	// итоговая формула
+    	// P = (S^2) + 1 / W
+    	// победит тот, у кого число будет САМЫМ МАЛЕНЬКИМ
+    	priority := (satiety * satiety) + 1 / waitTime
     
 
-		// 3. ПРОВЕРКА НА КАРАНТИН (1200 секунд = 20 минут)
-		/*if now-p.JoinedAt < 1200 {
-			// Если нода молодая — выкидываем её в самый конец очереди,
-			// прибавляя к приоритету огромное число.
+		// проверка на карантин (20 минут)
+		/*now := time.Now().Unix()
+		if now-p.JoinedAt < 1200 {
 			priority += 1000000.0
 		}*/
 
@@ -133,54 +123,51 @@ func (l *Ledger) GetSortedQueue() []string {
 			LotID:    id,
 			Priority: priority,
 			PeerID:   p.PeerID.String(),
-			JoinedAt: p.JoinedAt, // Понадобится для Tie-break
+			JoinedAt: p.JoinedAt, // понадобится для Tie-break
 		})
 	}
 
-	// 4. Детерминированная сортировка
+	// детерминированная сортировка
 	sort.Slice(activeItems, func(i, j int) bool {
-		// Сначала сравниваем по приоритету (с учетом штрафа за карантин)
+		// сначала сравниваем по приоритету
 		if activeItems[i].Priority != activeItems[j].Priority {
 			return activeItems[i].Priority < activeItems[j].Priority
 		}
-		// Если оба "старички" или оба "новички" с равным P — смотрим кто зашел раньше
+		// если оба "старички" или оба "новички" с равным P — смотрим кто зашел раньше
 		if activeItems[i].JoinedAt != activeItems[j].JoinedAt {
 			return activeItems[i].JoinedAt < activeItems[j].JoinedAt
 		}
-		// Если даже время захода совпало — финальный Tie-break по PeerID
+		// если даже время захода совпало — финальный Tie-break по PeerID
 		return activeItems[i].PeerID < activeItems[j].PeerID
 	})
 
-	// 5. Собираем только LotID
+	// собираем только LotID
 	result := make([]string, len(activeItems))
 	for i, item := range activeItems {
 		result[i] = item.LotID
 	}
 	return result
 }
-// StartJanitor — это фоновый процесс, который удаляет "мертвые" ноды.
 func (l *Ledger) StartJanitor(ctx context.Context) {
-	// Будем проверять список раз в минуту
+	// будем проверять список раз в минуту
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			// Если основная программа закрывается, выходим из цикла
 			return
 		case <-ticker.C:
-			l.mu.Lock() // Запираем на время уборки
+			l.mu.Lock() // запираем на время уборки
 			
 			now := time.Now()
-			//countBefore := len(l.Members)
 
 			for id, p := range l.Members {
-				// Если мы не слышали о ноде больше 2 минут — она ушла из сети
-				if now.Sub(p.LastSeen) > 5*time.Minute {
+				// если мы не слышали о ноде больше 2 минут — она ушла из сети
+				if now.Sub(p.LastSeen) > 2*time.Minute {
 					delete(l.Members, id)
 				}
 			}
-			l.mu.Unlock() // Отпираем
+			l.mu.Unlock()
 		}
 	}
 }
@@ -189,6 +176,6 @@ func (l *Ledger) UpdateTicks(lotID string) {
 	defer l.mu.Unlock()
 
 	if p, exists := l.Members[lotID]; exists {
-		p.T++ // Прибавляем 1 цикл нахождения в топе
+		p.T++ // прибавляем 1 цикл нахождения в топе
 	}
 }

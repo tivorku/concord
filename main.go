@@ -22,12 +22,10 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// 1. Инициализация памяти (Ledger)
 	myLedger := p2p.NewLedger()
 	go myLedger.StartJanitor(ctx)
 
-	// 2. Авторизация и параметры (Твои функции из t2api)
-	bearer, number := t2api.Login() // Вход по СМС или из файла
+	bearer, number := t2api.Login()
 	//myLotID, volume, value, err := t2api.ShowAndSelectLot(bearer, number)
 	/*if err != nil {
 	    fmt.Println(err)
@@ -41,7 +39,6 @@ func main() {
 	    value int = 15
 	)
 
-	// 3. Создание сетевого узла
 	privKey, _ := p2p.GetPrivateKey("identity.key")
 	h, err := p2p.InitHost(ctx, privKey)
 	if err != nil {
@@ -51,19 +48,15 @@ func main() {
 	now := time.Now().Unix()
     myLedger.Update(myLotID, h.ID(), 0, 0, now, 0, 0) 
 
-	// 4. Настройка скрытого протокола
 	rendezvous := GetProtocolID(fmt.Sprintf("%d-%d", volume, value), "W2Rw_qon&lV3wxlbhFE4")
 	fmt.Printf("[MDN] Вход в сегмент: %s\n", rendezvous)
 
-	// 5. Запуск поиска соседей и регистрации прокси
 	p2p.StartDiscovery(ctx, h, rendezvous)
-	// Важно: регистрируем возможность быть прокси для других
+	// регистрируем возможность быть прокси для других
 	mn := &p2p.MarketNode{Host: h, Ledger: myLedger, Ctx: ctx}
 	mn.RegisterProxyHandler()
-	// 6. Инициализация Стратега
 	strat := p2p.NewStrategist(myLedger, myLotID, volume, value)
 
-	// 7. Запуск рации (PubSub)
 	topic, _ := p2p.StartPubSub(ctx, h, rendezvous, myLedger, strat, bearer, number)
 	mn.Topic = topic
     go func() {
@@ -72,10 +65,17 @@ func main() {
                 for _, addr := range h.Addrs() {
                     fmt.Println(addr)
                 }
+            conns := h.Network().Conns()
+            fmt.Printf("[DEBUG] Всего сетевых соединений: %d\n", len(conns))
+            for _, c := range conns {
+                if c.RemotePeer().String() == "12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N" {
+                fmt.Println("Есть соединение с реле!")
+                }
+            }
             time.Sleep(3 * time.Second)
         }
     }()
-	// 8. Фоновые задачи Стратега (Анонсы и Дежурство)
+	// фоновые задачи стратега (анонсы и дежурство)
 	go strat.Run(ctx, mn, bearer, number)
 	go func() {
         for {
@@ -92,7 +92,6 @@ func main() {
 	select {}
 }
 
-// GetProtocolID создает уникальный путь для libp2p
 func GetProtocolID(base string, salt string) string {
 	data := []byte(base + salt)
 	hash := sha256.Sum256(data)

@@ -1,23 +1,27 @@
 package t2api
 
-import "os"
+import ("os"; "fmt")
 
 func Login() (string, string) {
     var access string
     Check()
-	
+    
+	// сначала проверяем входили ли мы ранее
 	numBytes, _ := os.ReadFile("number.txt")
     number := string(numBytes)
 	if number != "" {
 		TryAnotherNumber()
 	}
-
+    
+    // получаем номер при его отсутствии
 	numBytes, _ = os.ReadFile("number.txt")
 	number = string(numBytes)
 	if number == "" {
 		number = GetNumber()
 	}
+
 	var err error
+	// запрашиваем новый access-токен, если есть refresh-токен
 	refBytes, _ := os.ReadFile("refresh.txt")
 	refresh := string(refBytes)
 	if refresh != "" {
@@ -26,7 +30,7 @@ func Login() (string, string) {
 			os.Exit(1)
 		}
 	}
-
+    // если refresh-токен отсутствует, то запрашиваем смс, сохраняем refresh-токен в файл и access-токен в переменную
 	refBytes, _ = os.ReadFile("refresh.txt")
 	refresh = string(refBytes)
 	if refresh == "" {
@@ -51,7 +55,7 @@ func TryAnotherNumber() {
 }
 func GetNumber() string {
     var RememberNumber string
-	os.Remove("refresh.txt") // to exclude possibility of wrong refresh token
+	os.Remove("refresh.txt") // чтобы исключить ввероятность неподходящего refresh-токена
 	fmt.Print("Введите номер телефона: +7")
 	fmt.Scanln(&number)
 	fmt.Print("Запомнить номер телефона? (Y/n): ")

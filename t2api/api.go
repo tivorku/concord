@@ -88,10 +88,8 @@ func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
 			continue
 		}
 
-		// Проверка даты (Т2 иногда шлет даты в странных форматах)
 		t, err := time.Parse(time.RFC3339, lot.CreationDate)
 		if err != nil {
-			// Если RFC3339 не подошел, пробуем упрощенный формат
 			t, _ = time.Parse("2006-01-02T15:04:05Z", lot.CreationDate)
 		}
 
@@ -132,8 +130,6 @@ func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
 	return target.id, target.vol, target.amount, nil
 }
 
-
-// GetTop4IDs — итоговая функция
 func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
 	url := fmt.Sprintf("https://%s/api/exchange/lots?trafficType=data&volume=%d&cost=%d&limit=4", T2Host, volume, cost)
 	
@@ -142,7 +138,7 @@ func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
 		return nil, err
 	}
 
-	// Устанавливаем заголовки ТОЧНО как в рабочем скрипте
+	// устанавливаем заголовки ТОЧНО как в рабочем скрипте
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Tele2-User-Agent", AppVersion)
 	req.Header.Set("User-Agent", OkHttpVersion)
@@ -153,13 +149,11 @@ func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
 	}
 	defer resp.Body.Close()
 
-	// Читаем тело ответа для анализа
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка чтения тела: %v", err)
 	}
 
-	// Если сервер всё равно вернул не 200, выводим что именно не так
 	if resp.StatusCode != http.StatusOK {
 		snippet := string(body)
 		if len(snippet) > 200 {
@@ -168,7 +162,6 @@ func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
 		return nil, fmt.Errorf("сервер вернул %d. Тело: %s", resp.StatusCode, snippet)
 	}
 
-	// Декодируем JSON
 	var res struct {
 		Data []struct {
 			ID string `json:"id"`
@@ -192,7 +185,6 @@ func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
 	return results, nil
 }
 
-// Rocket выполняет поднятие лота. Поддерживает прокси-клиент.
 func Rocket(client *http.Client, bearer, number, lotID string) error {
 	url := fmt.Sprintf("https://%s/api/subscribers/7%s/exchange/lots/premium", T2Host, number)
 	jsonData := []byte(fmt.Sprintf(`{"lotId":"%s"}`, lotID))
