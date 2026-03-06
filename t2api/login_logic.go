@@ -13,7 +13,7 @@ func Login() (string, string) {
 		TryAnotherNumber()
 	}
     
-    // получаем номер при его отсутствии
+    // запрашиваем у пользователя номер при его отсутствии
 	numBytes, _ = os.ReadFile("number.txt")
 	number = string(numBytes)
 	if number == "" {
@@ -21,7 +21,7 @@ func Login() (string, string) {
 	}
 
 	var err error
-	// запрашиваем новый access-токен, если есть refresh-токен
+	// запрашиваем у сервера новый access-токен, если есть refresh-токен
 	refBytes, _ := os.ReadFile("refresh.txt")
 	refresh := string(refBytes)
 	if refresh != "" {
@@ -30,6 +30,7 @@ func Login() (string, string) {
 			os.Exit(1)
 		}
 	}
+	
     // если refresh-токен отсутствует, то запрашиваем смс, сохраняем refresh-токен в файл и access-токен в переменную
 	refBytes, _ = os.ReadFile("refresh.txt")
 	refresh = string(refBytes)
@@ -55,7 +56,7 @@ func TryAnotherNumber() {
 }
 func GetNumber() string {
     var RememberNumber string
-	os.Remove("refresh.txt") // чтобы исключить ввероятность неподходящего refresh-токена
+	os.Remove("refresh.txt") // чтобы обеспечить обновление refresh-токена для нового номера в любом случае
 	fmt.Print("Введите номер телефона: +7")
 	fmt.Scanln(&number)
 	fmt.Print("Запомнить номер телефона? (Y/n): ")

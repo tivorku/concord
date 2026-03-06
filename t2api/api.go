@@ -181,7 +181,6 @@ func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
 	for _, lot := range res.Data {
 		results = append(results, LotInfo{ID: lot.ID, IsBot: lot.My})
 	}
-
 	return results, nil
 }
 

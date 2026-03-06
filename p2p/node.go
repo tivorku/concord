@@ -57,7 +57,6 @@ func InitHost(ctx context.Context, privKey crypto.PrivKey) (host.Host, error) {
 		libp2p.EnableHolePunching(),
 		libp2p.NATPortMap(),
 		libp2p.EnableAutoNATv2(),
-		libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {return addrs}),
 		libp2p.ForceReachabilityPrivate(),
         libp2p.Transport(tcp.NewTCPTransport),
         libp2p.Transport(quic.NewTransport),
@@ -69,38 +68,27 @@ func InitHost(ctx context.Context, privKey crypto.PrivKey) (host.Host, error) {
     )
 	return h, err
 }
-
 func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) *dht.IpfsDHT {
 
     relayAddr, _ := multiaddr.NewMultiaddr("/ip4/144.31.152.128/tcp/4001/p2p/12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N")
     relayInfo, _ := peer.AddrInfoFromP2pAddr(relayAddr)
+    fmt.Println("[NODE] Подключение к реле...")
     err := h.Connect(ctx, *relayInfo)
-    /*if err == nil {
+    if err == nil {
         authenticateAtRelay(ctx, h, relayInfo.ID)
-    }*/
-    
+    }
+  //  bootstrapPeers := dht.GetDefaultBootstrapPeerAddrInfos()
 	kad, err := dht.New(ctx, h, dht.Mode(dht.ModeClient), dht.BootstrapPeers(*relayInfo))
 	if err != nil {
 		panic(err)
 	}
-    time.Sleep(5 * time.Second)
-	if err = kad.Bootstrap(ctx); err != nil {
-		panic(err)
-	}
+	/*for _, pi := range bootstrapPeers {
+        h.Connect(ctx, pi)
+    }*/
 
-	for _, addr := range dht.DefaultBootstrapPeers {
-		pi, _ := peer.AddrInfoFromP2pAddr(addr)
-		if err := h.Connect(ctx, *pi); err != nil {
-		    fmt.Println(err)
-		} else {
-		    fmt.Println("подключен к бутстрапу")
-		}// соединяемся с "гигантами" сети
-	}
-
-	// объявляем о себе и ищем других
+    if err = kad.Bootstrap(ctx); err != nil { panic(err) }
 	routingDiscovery := routing.NewRoutingDiscovery(kad)
-	util.Advertise(ctx, routingDiscovery, rendezvous)
-
+    util.Advertise(ctx, routingDiscovery, rendezvous)
 	go func() {
 		for {
 			peersChan, err := routingDiscovery.FindPeers(ctx, rendezvous)
@@ -110,7 +98,6 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) *dht.Ip
 
             for p := range peersChan {
                 if p.ID == h.ID() { continue }
-                if h.Network().Connectedness(p.ID) == network.Connected { continue }
                 go func(peerInfo peer.AddrInfo) {
                     // если адресов нет - ищем их
                     if len(peerInfo.Addrs) == 0 {
@@ -118,24 +105,36 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) *dht.Ip
                         if err != nil { return }
                         peerInfo = found
                     }
-                    err := h.Connect(ctx, peerInfo)
-                    if err == nil {
-                        fmt.Println("Найден сосед: ", peerInfo.ID)
+                    if h.Network().Connectedness(peerInfo.ID) != network.Connected {
+                        err := h.Connect(ctx, peerInfo)
+                        if err == nil {
+                            fmt.Println("Найден сосед: ", peerInfo.ID)
+                        }
                     }
-                }(p)
+                }(p)      
             }
-			time.Sleep(5*time.Second)
+			time.Sleep(15*time.Second)
 		}
 	}()
 	return kad
 }
 func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, s *Strategist, bearer, number string) (*pubsub.Topic, error) {
-    ps, _ := pubsub.NewGossipSub(ctx, h, pubsub.WithFloodPublish(true), pubsub.WithPeerExchange(true))
+    ps, _ := pubsub.NewGossipSub(ctx, h)
     topic, _ := ps.Join(topicName)
-    sub, _ := topic.Subscribe()
-    
     go func() {
-        
+        metaTopic, _ := ps.Join("_global_discovery")
+        for {
+            if len(metaTopic.ListPeers()) > 0 {
+                break
+            }
+            time.Sleep(100 * time.Millisecond)
+        }
+        if err := metaTopic.Publish(ctx, []byte(topicName)); err != nil {
+            fmt.Println(err)
+        }
+    }()
+    sub, _ := topic.Subscribe()
+    go func() {
         mn := &MarketNode{Host: h, Topic: topic, Ledger: l, Ctx: ctx}
         for {
             //fmt.Printf("[DEBUG-PUBSUB] Соседей в топике %s: %d\n", topicName, len(topic.ListPeers()))
@@ -217,6 +216,9 @@ func authenticateAtRelay(ctx context.Context, h host.Host, relayID peer.ID) erro
 	_, err = io.ReadFull(s, buf)
 	if string(buf) != "OK" {
 		fmt.Println("[Auth] Авторизация в реле прошла неудачно.")
+		os.Exit(1)
+	} else {
+	    fmt.Println("[Auth] Успешная авторизация на реле")
 	}
 	return err
 }

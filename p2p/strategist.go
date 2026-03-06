@@ -138,25 +138,6 @@ func (s *Strategist) ShowDashboard() {
 	for i, lotID := range queue {
 		p := s.ledger.Members[lotID]
 		if p == nil { continue }
-
-    	lastActivity := p.LastTopTick
-    	if lastActivity == 0 {
-    		lastActivity = p.JoinedAt
-    	}
-    
-    	waitTime := float64(p.GlobalTick - lastActivity)
-    	if waitTime < 1 {
-    		waitTime = 1 // защита от деления на 0
-    	}
-    
-    	// рассчитываем satiety
-    	// T — обычные циклы, R — ракеты (вес 1.2)
-    	satiety := float64(p.T) + (float64(p.R) * 1.2)
-    
-    	// итоговая формула
-    	// P = (S²) + 1 / W
-    	// победит тот, у кого число будет САМЫМ МАЛЕНЬКИМ
-    	priority := (satiety * satiety) + 1 / waitTime
 		
 		// пометка "это я"
 		prefix := "  "
@@ -176,15 +157,15 @@ func (s *Strategist) ShowDashboard() {
         }
 
 		fmt.Printf("%s%-1d | %-12s | %-4d | %-4d | %-6.2f | %s\n", 
-			prefix, i+1, shortPID, p.T, p.R, priority, status)
+			prefix, i+1, shortPID, p.T, p.R, p.PriorityVar, status)
 	}
 	fmt.Println("================================================================")
 }
 
 func (s *Strategist) checkDutyRole(myID peer.ID, numDutyNodes int) (bool, int) {
 	activePeers := s.ledger.GetSortedActivePeers()
-	if len(activePeers) == 1 || len(activePeers) == 0 {
-		return false, 0
+	if len(activePeers) == 0 {
+		return true, 0
 	}
 
 	// если нод меньше, чем нужно дежурных - дежурят все
@@ -258,6 +239,7 @@ func (s *Strategist) broadcastTopStatus(topic *pubsub.Topic, info t2api.LotInfo,
 }
 func (s *Strategist) publish(topic *pubsub.Topic, msg NodeMessage) {
 	raw, _ := json.Marshal(msg)
+	time.Sleep(2 * time.Second)
 	topic.Publish(context.Background(), raw)
 }
 
@@ -352,9 +334,9 @@ func (s *Strategist) wrapWithUTLS(conn net.Conn) (net.Conn, error) {
 
 	// выполняем Handshake вручную. 
 	// Это критично, чтобы зафиксировать маскировку до начала передачи данных.
-	if err := uConn.Handshake(); err != nil {
+/*	if err := uConn.Handshake(); err != nil {
 		return nil, fmt.Errorf("utls handshake failed: %w", err)
-	}
+	}*/
 
 	return uConn, nil
 }
@@ -385,7 +367,7 @@ func (s *Strategist) PerformExecution(ctx context.Context, mn *MarketNode, beare
 	}
 
 	// выбор пути (прокси или прямой выстрел)
-	proxyID := s.SelectRandomProxy(mn.Host)
+	/*proxyID := s.SelectRandomProxy(mn.Host)
 	var client *http.Client
 
 	if proxyID == "" {
@@ -397,16 +379,16 @@ func (s *Strategist) PerformExecution(ctx context.Context, mn *MarketNode, beare
 	}
 
 	// САМ ВЫСТРЕЛ
-	err := t2api.Rocket(client, bearer, number, s.myLotID)
-	//var err error = nil
+	err := t2api.Rocket(client, bearer, number, s.myLotID)*/
+	var err error = nil
 	if err == nil {
-	    //fmt.Println("Успешная имитация ракеты!")
+	    fmt.Println("Успешная имитация ракеты!")
 		
 		// синхронизация своего состояния
 		s.ledger.mu.Lock()
 		if p, ok := s.ledger.Members[s.myLotID]; ok {
 			p.R++ // увеличиваем количество потраченных ракет
-			//p.T = p.T + int64(rand.Intn(3)) + 1
+			p.T = p.T + int64(rand.Intn(3)) + 1
 			p.LastTopTick = s.ledger.GlobalTick
 			// вещаем на всю сеть: "я потратился, мой приоритет упал"
 			s.broadcastRocketFired(mn.Topic, mn.Host.ID(), p.T, p.R, p.JoinedAt, p.LastTopTick)
@@ -423,7 +405,7 @@ func (s *Strategist) CreateProxiedClient(ctx context.Context, h host.Host, proxy
 		Transport: &http.Transport{
 		    TLSNextProto:        make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
 			ForceAttemptHTTP2:   false,
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				// открываем P2P стрим к соседу-посреднику
 				stream, err := h.NewStream(ctx, proxyPeerID, ProtocolProxy)
 				if err != nil {

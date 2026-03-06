@@ -50,16 +50,15 @@ func main() {
 
 	rendezvous := GetProtocolID(fmt.Sprintf("%d-%d", volume, value), "W2Rw_qon&lV3wxlbhFE4")
 	fmt.Printf("[MDN] Вход в сегмент: %s\n", rendezvous)
-
 	p2p.StartDiscovery(ctx, h, rendezvous)
-	// регистрируем возможность быть прокси для других
+    // регистрируем возможность быть прокси для других
 	mn := &p2p.MarketNode{Host: h, Ledger: myLedger, Ctx: ctx}
-	mn.RegisterProxyHandler()
 	strat := p2p.NewStrategist(myLedger, myLotID, volume, value)
+	mn.RegisterProxyHandler()
+	mn.Topic, _ = p2p.StartPubSub(ctx, h, rendezvous, myLedger, strat, bearer, number)
+	//mn.Topic = topic
 
-	topic, _ := p2p.StartPubSub(ctx, h, rendezvous, myLedger, strat, bearer, number)
-	mn.Topic = topic
-    go func() {
+  /*  go func() {
         for {
             fmt.Println("\nТекущие адреса:")
                 for _, addr := range h.Addrs() {
@@ -67,14 +66,9 @@ func main() {
                 }
             conns := h.Network().Conns()
             fmt.Printf("[DEBUG] Всего сетевых соединений: %d\n", len(conns))
-            for _, c := range conns {
-                if c.RemotePeer().String() == "12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N" {
-                fmt.Println("Есть соединение с реле!")
-                }
-            }
             time.Sleep(3 * time.Second)
         }
-    }()
+    }()*/
 	// фоновые задачи стратега (анонсы и дежурство)
 	go strat.Run(ctx, mn, bearer, number)
 	go func() {
@@ -84,7 +78,7 @@ func main() {
                 return
             default:
                 strat.ShowDashboard()
-                time.Sleep(7 * time.Second) 
+                time.Sleep(3 * time.Second) 
             }
         }
     }()

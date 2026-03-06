@@ -15,22 +15,22 @@ var (
 )
 const (
     AppVersion    = "mytele2-app/6.35.0"
-    OkHttpVersion = "okhttp/4.0.12"
+    OkHttpVersion = "okhttp/4.12.0"
     T2Host        = "yar.t2.ru"
     T2FullHost    = "yar.t2.ru:443"
 )
 func init() {
-	// создаем кастомный DialTLS для имитации реального устройства (Android/Chrome)
+	// создаем кастомный DialTLS для имитации реального устройства
 	dialTLS := func(network, addr string) (net.Conn, error) {
 		conn, err := net.DialTimeout(network, addr, 10*time.Second)
 		if err != nil {
 			return nil, err
 		}
 
-		// создаем UClient, который мимикрирует под Chrome или Android.
-		// Cloudflare доверяет этим отпечаткам гораздо больше, чем стандартному Go.
+		// создаем UClient, который мимикрирует под android
 		config := &utls.Config{
 			ServerName: T2Host,
+			InsecureSkipVerify: false,
 			NextProtos: []string{"http/1.1"}, 
 		}
 		

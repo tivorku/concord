@@ -7,7 +7,9 @@ import (
     "context"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
-
+var (
+    PriorityVar float64
+)
 // Participant — это запись об одном конкретном лоте в сети.
 // это то, что наша нода будет помнить о каждом участнике сети.
 type Participant struct {
@@ -15,6 +17,7 @@ type Participant struct {
 	PeerID    peer.ID
 	T         int64
 	R         int
+	PriorityVar float64
 	LastTopTick int64
 	GlobalTick int64
 	JoinedAt  int64
@@ -54,8 +57,7 @@ func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR in
 		}
 		return
 	}
-
-	// если лот старый, но пришел более "молодой" JoinedAt (кто-то пытается обмануть возраст)
+	// если присоединился позже, чем в базе, то обновляем информацию
 	if joinedAt > p.JoinedAt {
 		p.JoinedAt = joinedAt // обновляем на более актуальное время
 	}
@@ -67,9 +69,9 @@ func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR in
 	    p.LastTopTick = lastTopTick
 	}
 
-	// синхронизация T и R (принцип максимума)
-	if incomingT > p.T { p.T = incomingT }
-	if incomingR > p.R { p.R = incomingR }
+	// синхронизация T и R
+	if incomingT != p.T { p.T = incomingT }
+	if incomingR != p.R { p.R = incomingR }
 	
 	p.LastSeen = time.Now()
 }
@@ -108,20 +110,20 @@ func (l *Ledger) GetSortedQueue() []string {
     	satiety := float64(p.T) + (float64(p.R) * 1.2)
     
     	// итоговая формула
-    	// P = (S^2) + 1 / W
+    	// P = S² / W
     	// победит тот, у кого число будет САМЫМ МАЛЕНЬКИМ
-    	priority := (satiety * satiety) + 1 / waitTime
+        p.PriorityVar = (satiety * satiety) + 0.01 / waitTime
     
 
 		// проверка на карантин (20 минут)
 		/*now := time.Now().Unix()
 		if now-p.JoinedAt < 1200 {
-			priority += 1000000.0
+			p.PriorityVar += 1000000.0
 		}*/
 
 		activeItems = append(activeItems, Item{
 			LotID:    id,
-			Priority: priority,
+			Priority: p.PriorityVar,
 			PeerID:   p.PeerID.String(),
 			JoinedAt: p.JoinedAt, // понадобится для Tie-break
 		})
