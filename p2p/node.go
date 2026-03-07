@@ -9,7 +9,7 @@ import (
 	"os"
 	"fmt"
 	"encoding/json"
-	
+	"crypto/sha256"
 	"market-denet/t2api"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
@@ -24,7 +24,11 @@ import (
 	tcp "github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	quic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/awnumar/memguard"
+	//ma "github.com/multiformats/go-multiaddr"
 )
+var encryptedPepper = []byte{0XE9, 0X8C, 0XEC, 0XC9, 0XE1, 0XCF, 0XD1, 0XD0, 0X98, 0XD2, 0XE8, 0X8D, 0XC9, 0XC6, 0XD2, 0XDC, 0XD6, 0XF8, 0XFB, 0X8A}
+const xorKey byte = 0xBE
 const ProtocolProxy protocol.ID = "/mdn/proxy/1.0.0"
 type NodeMessage struct {
 	Type   string `json:"type"`  // ANNOUNCE, ROCKET_FIRED, TOP_STATUS
@@ -39,10 +43,7 @@ type NodeMessage struct {
 }
 type MarketNode struct {
 	Host    host.Host
-	KadDHT  *dht.IpfsDHT
-	PubSub  *pubsub.PubSub
 	Topic   *pubsub.Topic
-	Sub     *pubsub.Subscription
 	Ledger  *Ledger
 	Ctx     context.Context
 }
@@ -68,17 +69,22 @@ func InitHost(ctx context.Context, privKey crypto.PrivKey) (host.Host, error) {
     )
 	return h, err
 }
-func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) *dht.IpfsDHT {
+func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
 
     relayAddr, _ := multiaddr.NewMultiaddr("/ip4/144.31.152.128/tcp/4001/p2p/12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N")
     relayInfo, _ := peer.AddrInfoFromP2pAddr(relayAddr)
-    fmt.Println("[NODE] Подключение к реле...")
     err := h.Connect(ctx, *relayInfo)
     if err == nil {
         authenticateAtRelay(ctx, h, relayInfo.ID)
+    } else {
+        fmt.Println(err)
     }
   //  bootstrapPeers := dht.GetDefaultBootstrapPeerAddrInfos()
 	kad, err := dht.New(ctx, h, dht.Mode(dht.ModeClient), dht.BootstrapPeers(*relayInfo))
+	if err != nil {
+		panic(err)
+	}
+	localDHT, err := dht.New(ctx, h, dht.Mode(dht.ModeClient), dht.BootstrapPeers(*relayInfo), dht.ProtocolPrefix("/mdenet"))
 	if err != nil {
 		panic(err)
 	}
@@ -87,8 +93,14 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) *dht.Ip
     }*/
 
     if err = kad.Bootstrap(ctx); err != nil { panic(err) }
-	routingDiscovery := routing.NewRoutingDiscovery(kad)
-    util.Advertise(ctx, routingDiscovery, rendezvous)
+    if err = localDHT.Bootstrap(ctx); err != nil { panic(err) }
+	routingDiscovery := routing.NewRoutingDiscovery(localDHT)
+	go func () {
+	    for {
+    	    time.Sleep(2 * time.Second)
+    	    util.Advertise(ctx, routingDiscovery, rendezvous)
+	    }
+	}()
 	go func() {
 		for {
 			peersChan, err := routingDiscovery.FindPeers(ctx, rendezvous)
@@ -101,26 +113,27 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) *dht.Ip
                 go func(peerInfo peer.AddrInfo) {
                     // если адресов нет - ищем их
                     if len(peerInfo.Addrs) == 0 {
-                        found, err := kad.FindPeer(ctx, peerInfo.ID)
+                        found, err := localDHT.FindPeer(ctx, peerInfo.ID)
                         if err != nil { return }
                         peerInfo = found
                     }
                     if h.Network().Connectedness(peerInfo.ID) != network.Connected {
-                        err := h.Connect(ctx, peerInfo)
-                        if err == nil {
+                        /*err := */h.Connect(ctx, peerInfo)
+                        /*if err == nil {
                             fmt.Println("Найден сосед: ", peerInfo.ID)
-                        }
+                        }*/
                     }
                 }(p)      
             }
-			time.Sleep(15*time.Second)
+			time.Sleep(5*time.Second)
 		}
 	}()
-	return kad
+	return
 }
 func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, s *Strategist, bearer, number string) (*pubsub.Topic, error) {
-    ps, _ := pubsub.NewGossipSub(ctx, h)
+    ps, _ := pubsub.NewGossipSub(ctx, h, pubsub.WithPeerExchange(true), pubsub.WithFloodPublish(true))
     topic, _ := ps.Join(topicName)
+    sub, _ := topic.Subscribe()
     go func() {
         metaTopic, _ := ps.Join("_global_discovery")
         for {
@@ -133,15 +146,14 @@ func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, 
             fmt.Println(err)
         }
     }()
-    sub, _ := topic.Subscribe()
     go func() {
         mn := &MarketNode{Host: h, Topic: topic, Ledger: l, Ctx: ctx}
         for {
-            //fmt.Printf("[DEBUG-PUBSUB] Соседей в топике %s: %d\n", topicName, len(topic.ListPeers()))
+            fmt.Printf("[DEBUG-PUBSUB] Соседей в топике %s: %d\n", topicName, len(topic.ListPeers()))
             msg, err := sub.Next(ctx)
             if err != nil { return }
-            if msg.ReceivedFrom == h.ID() { continue }
-
+            senderPID := msg.ReceivedFrom
+            if senderPID == h.ID() { continue }
             var m NodeMessage
             if err := json.Unmarshal(msg.Data, &m); err != nil { continue }
             s.HandleMessage(ctx, mn, m, bearer, number)
@@ -217,8 +229,21 @@ func authenticateAtRelay(ctx context.Context, h host.Host, relayID peer.ID) erro
 	if string(buf) != "OK" {
 		fmt.Println("[Auth] Авторизация в реле прошла неудачно.")
 		os.Exit(1)
-	} else {
-	    fmt.Println("[Auth] Успешная авторизация на реле")
 	}
 	return err
+}
+func GetProtocolID(volume, value int) string {
+    h := sha256.New()
+    fmt.Fprintf(h, "%d-%d", volume, value)
+    pepper := GetPepperSafe()
+    defer pepper.Destroy()
+    h.Write(pepper.Bytes())
+    return fmt.Sprintf("/mdn/v0.1/%x", h.Sum(nil)[:8])
+}
+func GetPepperSafe() *memguard.LockedBuffer {
+    buf := memguard.NewBuffer(len(encryptedPepper))
+    for i := 0; i < len(encryptedPepper); i++ {
+        buf.Bytes()[i] = encryptedPepper[i] ^ xorKey
+    }
+    return buf
 }

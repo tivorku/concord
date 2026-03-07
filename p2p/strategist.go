@@ -24,13 +24,6 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
-// константы для классификации действий
-const (
-	ActionRelax  = "RELAX"  // мой лот в топе, всё хорошо
-	ActionIgnore = "IGNORE" // это бот Т2, не тратим ракеты
-	ActionAttack = "ATTACK" // это посторонний!
-)
-
 type Strategist struct {
 	ledger   *Ledger
 	myLotID  string
@@ -52,10 +45,10 @@ func NewStrategist(l *Ledger, myLotID string, vol int, val int) *Strategist {
 }
 
 // AnalyzeTarget — классифицирует лот на 1-м месте
-func (s *Strategist) AnalyzeTarget(topLotID string, isBot bool) string {
+func (s *Strategist) AnalyzeTarget(topLotID string, isBot bool) bool {
 	// проверка на Бота Т2
 	if isBot {
-		return ActionIgnore
+		return false
 	}
 
 	// проверка на союзника
@@ -65,12 +58,12 @@ func (s *Strategist) AnalyzeTarget(topLotID string, isBot bool) string {
 
 	if isMember {
 		// если это наш лот или лот соседа
-		return ActionRelax
+		return false
 	}
 
 	// если это не бот и не участник сети — это посторонний
 	fmt.Printf("[СТРАТЕГ] Обнаружен посторонний на 1-м месте: %s\n", topLotID)
-	return ActionAttack
+	return true
 }
 
 // AmITheShooter — решает, является ли наша нода первой в очереди на выстрел
@@ -78,8 +71,8 @@ func (s *Strategist) AmITheShooter() bool {
 
 	queue := s.ledger.GetSortedQueue()
 
-	// если очередь пуста, стрелять нельзя
-	if len(queue) == 0 {
+	// если в очереди наша нода единственная, стрелять нельзя
+	if len(queue) == 1 {
 		return false
 	}
     leaderLotID := queue[0]
@@ -228,18 +221,11 @@ func (s *Strategist) broadcastTopStatus(topic *pubsub.Topic, info t2api.LotInfo,
 		PeerID: myPeerID,  
 		IsBot: info.IsBot, // бот это или нет
 	}
-
-	raw, err := json.Marshal(msg)
-	if err != nil {
-		return
-	}
-
-	// публикуем в топик
-	topic.Publish(context.Background(), raw)
+    s.publish(topic, msg)
+    
 }
 func (s *Strategist) publish(topic *pubsub.Topic, msg NodeMessage) {
 	raw, _ := json.Marshal(msg)
-	time.Sleep(2 * time.Second)
 	topic.Publish(context.Background(), raw)
 }
 
@@ -254,32 +240,33 @@ func (c *StreamConn) SetDeadline(t time.Time) error      { return c.Stream.SetDe
 func (c *StreamConn) SetReadDeadline(t time.Time) error  { return c.Stream.SetReadDeadline(t) }
 func (c *StreamConn) SetWriteDeadline(t time.Time) error { return c.Stream.SetWriteDeadline(t) }
 
-func (s *Strategist) SelectRandomProxy(h host.Host) peer.ID {
+func (s *Strategist) SelectRandomProxy(h host.Host, ctx context.Context) peer.ID {
 	s.ledger.mu.RLock()
 	defer s.ledger.mu.RUnlock()
 
 	// создаем список потенциальных прокси
-	var mdnPeers []peer.ID
-
+    uniquePeers := make(map[peer.ID]bool)
+    var candidates []peer.ID
+    
 	for _, participant := range s.ledger.Members {
 		// игнорируем себя
-		if participant.PeerID == h.ID() {
-			continue
-		}
+		if participant.PeerID == h.ID() { continue }
 		
-		// проверяем, на связи ли этот участник прямо сейчас
-		if h.Network().Connectedness(participant.PeerID) == network.Connected {
-			mdnPeers = append(mdnPeers, participant.PeerID)
-		}
-	}
-
+		if !uniquePeers[participant.PeerID] {
+            if h.Network().Connectedness(participant.PeerID) == network.Connected {
+                uniquePeers[participant.PeerID] = true
+                candidates = append(candidates, participant.PeerID)
+            }
+        }
+    }
+    
 	// если в Леджере никого на связи нет
-	if len(mdnPeers) == 0 {
-		fmt.Println("[MDN] Своих нод для прокси не найдено. Использую прямой выстрел.")
+	if len(candidates) == 0 {
+		fmt.Println("[MDN] Прокси не найдено. Использую прямой запрос.")
 		return "" 
 	}
 	
-	return mdnPeers[rand.Intn(len(mdnPeers))]
+	return candidates[rand.Intn(len(candidates))]
 }
 func (s *Strategist) Run(ctx context.Context, mn *MarketNode, bearer, number string) {
 	// запускаем фоновый цикл дежурного
@@ -290,35 +277,33 @@ func (s *Strategist) Run(ctx context.Context, mn *MarketNode, bearer, number str
 func (s *Strategist) HandleMessage(ctx context.Context, mn *MarketNode, m NodeMessage, bearer, number string) {
     fmt.Printf("[DEBUG] Пришел тип: %s | Лот: %s | От: %s\n", m.Type, m.LotID, m.PeerID)
 	switch m.Type {
-	case "ANNOUNCE", "ROCKET_FIRED":
-	    s.ledger.mu.Lock()
-	    if m.GlobalTick > s.ledger.GlobalTick {
-	        s.ledger.GlobalTick = m.GlobalTick
-	    }
-	    s.ledger.mu.Unlock()
-		// обновляем память о соседе
-		s.ledger.Update(m.LotID, m.PeerID, m.T, m.R, m.JoinedAt, m.LastTopTick, m.GlobalTick)
-		//fmt.Println("[DEBUG] Ledger обновлен!")
-
-	case "TOP_STATUS":
-		// инкрементируем тики для того, кто сейчас в топе
-		s.ledger.UpdateTicks(m.LotID)
-		status := s.AnalyzeTarget(m.LotID, m.IsBot)
-        
-		if status == ActionAttack {
-			s.mu.Lock()
-            if s.isExecuting {
-                s.mu.Unlock()
-                return // мы уже в процессе выстрела, игнорируем новые сигналы
-            }
-			if s.AmITheShooter() {
-				s.isExecuting = true 
-                s.mu.Unlock()
-				go s.PerformExecution(ctx, mn, bearer, number)
-			} else {
-			    s.mu.Unlock()
-			}
-		}
+    	case "ANNOUNCE", "ROCKET_FIRED":
+    	    s.ledger.mu.Lock()
+    	    if m.GlobalTick > s.ledger.GlobalTick {
+    	        s.ledger.GlobalTick = m.GlobalTick
+    	    }
+    	    s.ledger.mu.Unlock()
+    		s.ledger.Update(m.LotID, m.PeerID, m.T, m.R, m.JoinedAt, m.LastTopTick, m.GlobalTick)
+    
+    	case "TOP_STATUS":
+    		// инкрементируем тики для того, кто сейчас в топе
+    		s.ledger.UpdateTicks(m.LotID)
+    		status := s.AnalyzeTarget(m.LotID, m.IsBot)
+            
+    		if status {
+    			s.mu.Lock()
+                if s.isExecuting {
+                    s.mu.Unlock()
+                    return // мы уже в процессе выстрела, игнорируем новые сигналы
+                }
+    			if s.AmITheShooter() {
+    				s.isExecuting = true 
+                    s.mu.Unlock()
+    				go s.PerformExecution(ctx, mn, bearer, number)
+    			} else {
+    			    s.mu.Unlock()
+    			}
+    		}
 	}
 }
 // wrapWithUTLS - маскировка. превращает "голый" стрим в "мобильное" соединение.
@@ -332,12 +317,6 @@ func (s *Strategist) wrapWithUTLS(conn net.Conn) (net.Conn, error) {
 	// создаем специальный uTLS клиент с профилем Android
 	uConn := utls.UClient(conn, config, utls.HelloAndroid_11_OkHttp)
 
-	// выполняем Handshake вручную. 
-	// Это критично, чтобы зафиксировать маскировку до начала передачи данных.
-/*	if err := uConn.Handshake(); err != nil {
-		return nil, fmt.Errorf("utls handshake failed: %w", err)
-	}*/
-
 	return uConn, nil
 }
 // PerformExecution — Главный процесс. Объединяет джиттер, прокси и отчетность.
@@ -349,29 +328,28 @@ func (s *Strategist) PerformExecution(ctx context.Context, mn *MarketNode, beare
 		s.mu.Unlock()
 	}()
     s.mu.Lock()
-	if time.Since(s.lastMyShotTime) < 10*time.Second {
+	if time.Since(s.lastMyShotTime) < 5*time.Second {
 		s.mu.Unlock()
 		// мы недавно стреляли. пропускаем этот цикл, чтобы не злить антифрод.
-		fmt.Println("Уже недавно стреляли. Ждём 10 секунд")
+		fmt.Println("Уже недавно стреляли. Ждём 5 секунд")
 		return 
 	}
 	s.lastMyShotTime = time.Now() // фиксируем попытку сразу
 	s.mu.Unlock()
-	wait := rand.Intn(3)
-	fmt.Printf("[MDN] Враг обнаружен! Имитирую раздумья (%d сек)...\n", wait)
+	wait := rand.Intn(1000)+2000
+	fmt.Printf("[MDN] Враг обнаружен! Имитирую раздумья (%d сек)...\n", wait/1000)
     
 	select {
-	case <-time.After(time.Duration(wait) * time.Second):
+	case <-time.After(time.Duration(wait) * time.Millisecond):
 	case <-ctx.Done():
 		return
 	}
 
 	// выбор пути (прокси или прямой выстрел)
-	/*proxyID := s.SelectRandomProxy(mn.Host)
+	proxyID := s.SelectRandomProxy(mn.Host, ctx)
 	var client *http.Client
 
 	if proxyID == "" {
-		fmt.Println("[MDN] Соседей-прокси нет. Использую ПРЯМОЙ выстрел (риск палева IP)!")
 		client = t2api.SharedClient
 	} else {
 		fmt.Printf("[MDN] Использую стелс-туннель через: %s\n", proxyID.String()[len(proxyID)-8:])
@@ -379,10 +357,10 @@ func (s *Strategist) PerformExecution(ctx context.Context, mn *MarketNode, beare
 	}
 
 	// САМ ВЫСТРЕЛ
-	err := t2api.Rocket(client, bearer, number, s.myLotID)*/
-	var err error = nil
+	err := t2api.Rocket(client, bearer, number, s.myLotID)
+	//var err error = nil
 	if err == nil {
-	    fmt.Println("Успешная имитация ракеты!")
+	   // fmt.Println("Успешная имитация ракеты!")
 		
 		// синхронизация своего состояния
 		s.ledger.mu.Lock()
@@ -436,7 +414,7 @@ func (s *Strategist) dutyLoop(ctx context.Context, mn *MarketNode) {
 			// решаем, нужно ли нам стать дежурным принудительно
 			isDuty, _ := s.checkDutyRole(mn.Host.ID(), 3)
 			if isDuty {
-				lots, err := t2api.GetTop4IDs(int(s.volume), int(s.value))
+				lots, err := t2api.GetTop4IDs(s.volume, s.value)
 				if err == nil && len(lots) > 0 {
 					s.broadcastTopStatus(mn.Topic, lots[0], mn.Host.ID())
 				} else {

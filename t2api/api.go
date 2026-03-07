@@ -38,16 +38,6 @@ type T2LotsResponse struct {
 		CreationDate string `json:"creationDate"`
 	} `json:"data"`
 }
-var emojiMap = map[string]string{
-	"devil":  "😈",
-	"cool":   "😎",
-	"cat":    "😺",
-	"zipped": "🤐",
-	"scream": "😱",
-	"rich":   "🤑",
-	"tongue": "😛",
-	"bomb":   "💣",
-}
 func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
 	url := fmt.Sprintf("https://%s/api/subscribers/7%s/exchange/lots/created", T2Host, number)
 	req, _ := http.NewRequest("GET", url, nil)

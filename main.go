@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
 	//"encoding/json"
 	"fmt"
 	"market-denet/p2p"
@@ -48,17 +47,16 @@ func main() {
 	now := time.Now().Unix()
     myLedger.Update(myLotID, h.ID(), 0, 0, now, 0, 0) 
 
-	rendezvous := GetProtocolID(fmt.Sprintf("%d-%d", volume, value), "W2Rw_qon&lV3wxlbhFE4")
+	rendezvous := p2p.GetProtocolID(volume, value)
 	fmt.Printf("[MDN] Вход в сегмент: %s\n", rendezvous)
+	
 	p2p.StartDiscovery(ctx, h, rendezvous)
-    // регистрируем возможность быть прокси для других
 	mn := &p2p.MarketNode{Host: h, Ledger: myLedger, Ctx: ctx}
 	strat := p2p.NewStrategist(myLedger, myLotID, volume, value)
 	mn.RegisterProxyHandler()
 	mn.Topic, _ = p2p.StartPubSub(ctx, h, rendezvous, myLedger, strat, bearer, number)
-	//mn.Topic = topic
 
-  /*  go func() {
+   /* go func() {
         for {
             fmt.Println("\nТекущие адреса:")
                 for _, addr := range h.Addrs() {
@@ -69,7 +67,6 @@ func main() {
             time.Sleep(3 * time.Second)
         }
     }()*/
-	// фоновые задачи стратега (анонсы и дежурство)
 	go strat.Run(ctx, mn, bearer, number)
 	go func() {
         for {
@@ -78,18 +75,12 @@ func main() {
                 return
             default:
                 strat.ShowDashboard()
-                time.Sleep(3 * time.Second) 
+                time.Sleep(5 * time.Second) 
             }
         }
     }()
 
 	select {}
-}
-
-func GetProtocolID(base string, salt string) string {
-	data := []byte(base + salt)
-	hash := sha256.Sum256(data)
-	return fmt.Sprintf("/mdn/v0.1/%x", hash[:8])
 }
 
 func hideAndroidNetworkError() {
@@ -105,3 +96,11 @@ func hideAndroidNetworkError() {
 		}
 	}()
 }
+
+// 2. Использование как Public Key для лицензии
+/*func VerifyLicense(data, signature []byte) bool {
+pepper := GetPepperSafe()
+defer pepper.Destroy()
+// Используем байты ключа для проверки подписи ed25519
+return ed25519.Verify(pepper.Bytes(), data, signature)
+}*/
