@@ -117,11 +117,11 @@ func (s *Strategist) ShowDashboard() {
 
 	ClearScreen()
 
-	fmt.Println("================================================================")
+	fmt.Println("==================================================================")
 	fmt.Printf(" СЕГМЕНТ: %d ГБ / %d РУБ | ЛОТ: %s\n", s.volume, s.value, s.myLotID)
-	fmt.Println("================================================================")
+	fmt.Println("==================================================================")
 	fmt.Printf("%-3s | %-12s | %-4s | %-4s | %-6s | %s\n", "#", "PeerID", "T", "R", "P", "Статус")
-	fmt.Println("----------------------------------------------------------------")
+	fmt.Println("------------------------------------------------------------------")
 
 	queue := s.ledger.GetSortedQueue()
 
@@ -152,22 +152,18 @@ func (s *Strategist) ShowDashboard() {
 		fmt.Printf("%s%-1d | %-12s | %-4d | %-4d | %-6.2f | %s\n", 
 			prefix, i+1, shortPID, p.T, p.R, p.PriorityVar, status)
 	}
-	fmt.Println("================================================================")
+	fmt.Println("==================================================================")
 }
 
-func (s *Strategist) checkDutyRole(myID peer.ID, numDutyNodes int) (bool, int) {
+func (s *Strategist) checkDutyRole(myID peer.ID, numDutyNodes int) bool {
 	activePeers := s.ledger.GetSortedActivePeers()
 	if len(activePeers) == 0 {
-		return true, 0
+		return true
 	}
 
 	// если нод меньше, чем нужно дежурных - дежурят все
 	if len(activePeers) <= numDutyNodes {
-		myRank := -1
-		for i, p := range activePeers {
-			if p == myID { myRank = i; break }
-		}
-		return true, myRank
+		return true
 	}
 
 	// создаем детерминированный рандом на основе времени
@@ -190,16 +186,14 @@ func (s *Strategist) checkDutyRole(myID peer.ID, numDutyNodes int) (bool, int) {
     
 	// проверяем, входит ли нода в этот список
 	isDuty := false
-	myRank := 99
-	for i, p := range dutyNodes {
+	for _, p := range dutyNodes {
 		if p.String() == myID.String() {
 			isDuty = true
-			myRank = i
 			break
 		}
 	}
 
-	return isDuty, myRank
+	return isDuty
 }
 
 func (s *Strategist) broadcastRocketFired(topic *pubsub.Topic, myPeerID peer.ID, myT int64, myR int, joinedAt int64, lastTopTick int64) {
@@ -290,19 +284,16 @@ func (s *Strategist) HandleMessage(ctx context.Context, mn *MarketNode, m NodeMe
     		s.ledger.UpdateTicks(m.LotID)
     		status := s.AnalyzeTarget(m.LotID, m.IsBot)
             
-    		if status {
+    		if status && s.AmITheShooter() {
     			s.mu.Lock()
                 if s.isExecuting {
                     s.mu.Unlock()
                     return // мы уже в процессе выстрела, игнорируем новые сигналы
                 }
-    			if s.AmITheShooter() {
-    				s.isExecuting = true 
-                    s.mu.Unlock()
-    				go s.PerformExecution(ctx, mn, bearer, number)
-    			} else {
-    			    s.mu.Unlock()
-    			}
+				s.isExecuting = true 
+                s.mu.Unlock()
+				go s.PerformExecution(ctx, mn, bearer, number)
+			
     		}
 	}
 }
@@ -412,7 +403,7 @@ func (s *Strategist) dutyLoop(ctx context.Context, mn *MarketNode) {
 		case <-ticker.C:
 
 			// решаем, нужно ли нам стать дежурным принудительно
-			isDuty, _ := s.checkDutyRole(mn.Host.ID(), 3)
+			isDuty := s.checkDutyRole(mn.Host.ID(), 3)
 			if isDuty {
 				lots, err := t2api.GetTop4IDs(s.volume, s.value)
 				if err == nil && len(lots) > 0 {

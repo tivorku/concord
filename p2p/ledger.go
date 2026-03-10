@@ -90,8 +90,8 @@ func (l *Ledger) GetSortedQueue() []string {
 	var activeItems []Item
 
 	for id, p := range l.Members {
-		// игнорируем тех, кто молчит дольше 2 минут (оффлайн)
-		if time.Since(p.LastSeen) > 2*time.Minute {
+		// игнорируем тех, кто молчит дольше 10 секунд (оффлайн)
+		if time.Since(p.LastSeen) > 10*time.Second {
 			continue
 		}
 
@@ -110,9 +110,9 @@ func (l *Ledger) GetSortedQueue() []string {
     	satiety := float64(p.T) + (float64(p.R) * 1.2)
     
     	// итоговая формула
-    	// P = S² / W
+    	// P = (S² + 0.01) / W
     	// победит тот, у кого число будет САМЫМ МАЛЕНЬКИМ
-        p.PriorityVar = (satiety * satiety) + 0.01 / waitTime
+        p.PriorityVar = ((satiety * satiety) + 0.01) / waitTime
     
 
 		// проверка на карантин (20 минут)

@@ -1,4 +1,5 @@
 package t2api
+
 import (
     "net/http"
     "time"
@@ -6,6 +7,7 @@ import (
     utls "github.com/refraction-networking/utls"
     "crypto/tls"
 )
+
 var (
     yes_reset = map[string]bool{"yes": true, "ye": true, "y": true}
 	no = map[string]bool{"no": true, "n": true}
@@ -13,6 +15,7 @@ var (
 	yes = map[string]bool{"": true, "yes": true, "ye": true, "y": true}
 	SharedClient *http.Client
 )
+
 const (
     AppVersion    = "mytele2-app/6.35.0"
     OkHttpVersion = "okhttp/4.12.0"
@@ -30,7 +33,6 @@ func init() {
 		// создаем UClient, который мимикрирует под android
 		config := &utls.Config{
 			ServerName: T2Host,
-			InsecureSkipVerify: false,
 			NextProtos: []string{"http/1.1"}, 
 		}
 		
@@ -49,9 +51,7 @@ func init() {
 			DialTLS:             dialTLS,
 			MaxIdleConns:        10,
 			IdleConnTimeout:     90 * time.Second,
-			// принудительно отключаем HTTP/2, так как в Go он палится на отпечатках
-			TLSNextProto:        make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
-			ForceAttemptHTTP2:   false,
+			TLSNextProto:        make(map[string]func(authority string, c *tls.Conn) http.RoundTripper), // принудительно отключаем HTTP/2, так как в Go он палится на отпечатках
 			DisableCompression: false,
 		},
 	}

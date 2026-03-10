@@ -1,7 +1,9 @@
 package t2api
 
-import ("fmt"
-        "math")
+import (
+        "fmt"
+        "math"
+)
 
 func getCost(volume float64, TrafficType string) float64 {
     var cost float64

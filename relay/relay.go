@@ -5,6 +5,7 @@ import (
 	"log"
     "time"
     "sync"
+    "runtime"
     "io"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
@@ -16,34 +17,89 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	connmgr "github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-libp2p/core/host"
+	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/core/protocol"
+	manet "github.com/multiformats/go-multiaddr/net"
 )
 var (
-	// Список авторизованных PeerID и время их авторизации
 	trustedPeers = make(map[peer.ID]bool)
 	authMu       sync.RWMutex
 	password     = "2a35442281f13052136c53589ae2f51b"
 	bootstrapIDs = make(map[peer.ID]bool)
 )
-
+func init() {
+    runtime.GOMAXPROCS(1)
+}
 func main() {
 	ctx := context.Background()
 	
 	privKey, _ := loadKey()
-	relayResources := relay.Resources{
-        MaxReservations:        1024, // Вместо 128 по умолчанию
-        MaxReservationsPerIP:   64,   // Вместо 4 по умолчанию
-        MaxReservationsPerPeer: 64,
-        ReservationTTL:         1 * time.Hour,
+	wm := NewWhitelistManager("whitelist.json")
+    for _, addr := range dht.DefaultBootstrapPeers {
+        if ip, err := manet.ToIP(addr); err == nil {
+            wm.IPs[ip.String()] = true
+        }
     }
+
+    // 3. Запускаем HTTP сервер в фоне
+    go RunAuthServer(wm, "8080", "7370e4b93804e5cf4d2f38984dd8d27c")
+	relayResources := relay.DefaultResources()
+    relayResources.MaxReservationsPerIP = 2
+    relayResources.MaxCircuits = 16
+    relayResources.ReservationTTL = 30 * time.Minute
+    relayResources.BufferSize = 2048
+    relayResources.Limit = &relay.RelayLimit{
+        Duration: 1 * time.Minute,
+        Data: 128 << 10,
+    }
+    
     cm, err := connmgr.NewConnManager(
-		256, // Low water mark
-		512, // High water mark
+		30, // Low water mark
+		80, // High water mark
 		connmgr.WithGracePeriod(time.Minute),
 	)
 	if err != nil {
 		panic(err)
 	}
+	
+    scalingLimits := rcmgr.DefaultLimits
+    libp2p.SetDefaultServiceLimits(&scalingLimits)
+    concreteLimits := scalingLimits.Scale(1<<30, 1024) 
+    cfg := rcmgr.PartialLimitConfig{
+        System: rcmgr.ResourceLimits{
+            ConnsInbound:     rcmgr.LimitVal(128), 
+            ConnsOutbound:    rcmgr.LimitVal(128),
+            StreamsInbound:   rcmgr.LimitVal(256),
+            StreamsOutbound:  rcmgr.LimitVal(512),
+        },
+        Transient: rcmgr.ResourceLimits{
+            ConnsInbound:    rcmgr.LimitVal(24),  
+            ConnsOutbound:   rcmgr.LimitVal(16),
+            StreamsInbound:  rcmgr.LimitVal(16),
+        },
+        Protocol: map[protocol.ID]rcmgr.ResourceLimits{
+            "/ipfs/kad/1.0.0": {
+                StreamsInbound:  rcmgr.LimitVal(64),
+                StreamsOutbound: rcmgr.LimitVal(256),
+                Memory:          64 << 20,
+            },
+            "/ipfs/id/1.0.0": {
+                StreamsInbound:  rcmgr.LimitVal(32),
+                StreamsOutbound: rcmgr.LimitVal(32),
+                Memory:          64 << 20,
+            },
+            "/ipfs/id/push/1.0.0": {
+                StreamsOutbound: rcmgr.BlockAllLimit,
+            },
+        },
+    }
+    finalLimits := cfg.Build(concreteLimits)
+    limiter := rcmgr.NewFixedLimiter(finalLimits)
+    rm, err := rcmgr.NewResourceManager(limiter)
+    if err != nil {
+        panic(err)
+    }
 	h, err := libp2p.New(
 	    libp2p.Identity(privKey),
 		libp2p.ListenAddrStrings(
@@ -51,22 +107,20 @@ func main() {
         "/ip4/0.0.0.0/udp/4001/quic-v1",
         ),
         libp2p.EnableRelayService(relay.WithResources(relayResources)),
-        libp2p.ResourceManager(&network.NullResourceManager{}),
+        libp2p.ResourceManager(rm),
         libp2p.ConnectionManager(cm),
         libp2p.EnableNATService(),
-		libp2p.EnableAutoNATv2(),
+        libp2p.ConnectionGater(&RelayGater{w: wm}),
 		libp2p.ForceReachabilityPublic(),
 		libp2p.EnableHolePunching(),
 	)
 	if err != nil {
 		panic(err)
 	}
-	initBootstrapList()
-    setupAuthHandler(h)
 	defer h.Close()
     
     bootstrapPeers := dht.GetDefaultBootstrapPeerAddrInfos()
-    kad, err := dht.New(ctx, h, dht.Mode(dht.ModeServer), dht.BootstrapPeers(bootstrapPeers...))
+    kad, err := dht.New(ctx, h, dht.Mode(dht.ModeServer), dht.BootstrapPeers(bootstrapPeers...), dht.Concurrency(1), dht.RoutingTableRefreshPeriod(1 * time.Hour))
     if err != nil {
         panic(err)
     }
@@ -97,7 +151,7 @@ func main() {
         Addrs: h.Addrs(),
     })
 	log.Println("\n========================================================")
-	log.Println("   MDN LIGHTHOUSE DEPLOYED")
+	log.Println("   LIGHTHOUSE DEPLOYED")
 	log.Println("========================================================")
 	log.Println("Connection addresses:")
     for _, addr := range addrs {
@@ -110,77 +164,6 @@ func loadKey() (crypto.PrivKey, error) {
 	data := "c79bbaf8b30abeb7d67680b2091ff8961f9022e9100ae321c840c5e769a717eef26c5b882d34161082675f553790aa3d6f9d04a5425ea2f64bd040f66c93606d"
 	seed, _ := hex.DecodeString(string(data))
 	return crypto.UnmarshalEd25519PrivateKey(seed)
-}
-
-func isBootstrap(id peer.ID) bool {
-	return bootstrapIDs[id]
-}
-func setupAuthHandler(h host.Host) {
-	h.SetStreamHandler("/mdn-private-auth/1.0.0", func(s network.Stream) {
-		defer s.Close()
-		
-		// Читаем пароль от клиента
-		buf := make([]byte, len(password))
-		s.SetDeadline(time.Now().Add(5 * time.Second))
-		_, err := io.ReadFull(s, buf)
-		
-		if err == nil && string(buf) == password {
-			authMu.Lock()
-			trustedPeers[s.Conn().RemotePeer()] = true
-			authMu.Unlock()
-			s.Write([]byte("OK")) // Подтверждаем клиенту успех
-			log.Printf("[Auth] Peer %s successfully authorized\n", s.Conn().RemotePeer())
-		}
-	})
-
-	// Фоновый процесс: разрыв соединений с неавторизованными
-	go func() {
-		for {
-			time.Sleep(5 * time.Second)
-			for _, conn := range h.Network().Conns() {
-				pid := conn.RemotePeer()
-				
-				// Пропускаем бутстрап-узлы
-				if isBootstrap(pid) {
-					continue
-				}
-                authMu.RLock()
-                trusted := trustedPeers[pid]
-                authMu.RUnlock()
-				// Если пир не авторизован и подключен более 10 секунд
-				if !trusted && time.Since(conn.Stat().Opened) > 10*time.Second {
-					//log.Printf("[Auth] Кикаем неавторизованного: %s\n", pid)
-					conn.Close()
-				}
-			}
-		}
-	}()
-	go func() {
-        ticker := time.NewTicker(5 * time.Minute)
-        defer ticker.Stop()
-        for {
-            select {
-            case <-ticker.C:
-                authMu.Lock()
-                for pid := range trustedPeers {
-                    if h.Network().Connectedness(pid) != network.Connected {
-                        delete(trustedPeers, pid)
-                        log.Printf("[Auth] Peer %s disconnected\n", pid)
-                    }
-                }
-                authMu.Unlock()
-            }
-        }
-    }()
-}
-func initBootstrapList() {
-	for _, addr := range dht.DefaultBootstrapPeers {
-		pi, err := peer.AddrInfoFromP2pAddr(addr)
-		if err == nil {
-			bootstrapIDs[pi.ID] = true
-		}
-	}
-	log.Printf("[System] Loaded %d Bootstrap exceptions\n", len(bootstrapIDs))
 }
 func startGossipOrchestrator(ctx context.Context, ps *pubsub.PubSub) {
     joined := make(map[string]bool)

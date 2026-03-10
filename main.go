@@ -11,8 +11,10 @@ import (
 	"runtime"
 	"strings"
 	"strconv"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"math/rand/v2"
 	"time"
+
 )
 func main() {
 	if runtime.GOOS == "android" {
@@ -37,8 +39,10 @@ func main() {
 	    volume int = 1
 	    value int = 15
 	)
-
+    
 	privKey, _ := p2p.GetPrivateKey("identity.key")
+	myID, _ := peer.IDFromPrivateKey(privKey)
+	err := p2p.KnockToRelay("144.31.152.128", myID, "7370e4b93804e5cf4d2f38984dd8d27c")
 	h, err := p2p.InitHost(ctx, privKey)
 	if err != nil {
 		fmt.Printf("[ОШИБКА] Хост: %v\n", err)
@@ -49,14 +53,14 @@ func main() {
 
 	rendezvous := p2p.GetProtocolID(volume, value)
 	fmt.Printf("[MDN] Вход в сегмент: %s\n", rendezvous)
-	
 	p2p.StartDiscovery(ctx, h, rendezvous)
+	
 	mn := &p2p.MarketNode{Host: h, Ledger: myLedger, Ctx: ctx}
 	strat := p2p.NewStrategist(myLedger, myLotID, volume, value)
 	mn.RegisterProxyHandler()
 	mn.Topic, _ = p2p.StartPubSub(ctx, h, rendezvous, myLedger, strat, bearer, number)
 
-   /* go func() {
+    go func() {
         for {
             fmt.Println("\nТекущие адреса:")
                 for _, addr := range h.Addrs() {
@@ -66,7 +70,7 @@ func main() {
             fmt.Printf("[DEBUG] Всего сетевых соединений: %d\n", len(conns))
             time.Sleep(3 * time.Second)
         }
-    }()*/
+    }()
 	go strat.Run(ctx, mn, bearer, number)
 	go func() {
         for {

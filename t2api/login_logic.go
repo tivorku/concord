@@ -1,6 +1,9 @@
 package t2api
 
-import ("os"; "fmt")
+import (
+        "os"
+        "fmt"
+)
 
 func Login() (string, string) {
     var access string

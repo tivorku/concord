@@ -25,6 +25,7 @@ import (
 	quic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/awnumar/memguard"
+	"net/http"
 	//ma "github.com/multiformats/go-multiaddr"
 )
 var encryptedPepper = []byte{0XE9, 0X8C, 0XEC, 0XC9, 0XE1, 0XCF, 0XD1, 0XD0, 0X98, 0XD2, 0XE8, 0X8D, 0XC9, 0XC6, 0XD2, 0XDC, 0XD6, 0XF8, 0XFB, 0X8A}
@@ -73,13 +74,18 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
 
     relayAddr, _ := multiaddr.NewMultiaddr("/ip4/144.31.152.128/tcp/4001/p2p/12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N")
     relayInfo, _ := peer.AddrInfoFromP2pAddr(relayAddr)
+    
     err := h.Connect(ctx, *relayInfo)
     if err == nil {
         authenticateAtRelay(ctx, h, relayInfo.ID)
     } else {
         fmt.Println(err)
+        os.Exit(1)
     }
-  //  bootstrapPeers := dht.GetDefaultBootstrapPeerAddrInfos()
+   /* bootstrapPeers := dht.GetDefaultBootstrapPeerAddrInfos()
+    for _, pi := range bootstrapPeers {
+        go h.Connect(ctx, pi)
+    }*/
 	kad, err := dht.New(ctx, h, dht.Mode(dht.ModeClient), dht.BootstrapPeers(*relayInfo))
 	if err != nil {
 		panic(err)
@@ -88,9 +94,6 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
 	if err != nil {
 		panic(err)
 	}
-	/*for _, pi := range bootstrapPeers {
-        h.Connect(ctx, pi)
-    }*/
 
     if err = kad.Bootstrap(ctx); err != nil { panic(err) }
     if err = localDHT.Bootstrap(ctx); err != nil { panic(err) }
@@ -125,7 +128,7 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
                     }
                 }(p)      
             }
-			time.Sleep(5*time.Second)
+			time.Sleep(10*time.Second)
 		}
 	}()
 	return
@@ -246,4 +249,16 @@ func GetPepperSafe() *memguard.LockedBuffer {
         buf.Bytes()[i] = encryptedPepper[i] ^ xorKey
     }
     return buf
+}
+func KnockToRelay(relayIP string, myID peer.ID, pass string) error {
+	url := fmt.Sprintf("http://%s:8080/register?id=%s&pass=%s", relayIP, myID.String(), pass)
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("shield rejected us")
+	}
+	return nil
 }
