@@ -103,8 +103,8 @@ func main() {
 	h, err := libp2p.New(
 	    libp2p.Identity(privKey),
 		libp2p.ListenAddrStrings(
-        "/ip4/0.0.0.0/tcp/4001",
-        "/ip4/0.0.0.0/udp/4001/quic-v1",
+        "/ip4/0.0.0.0/tcp/42954",
+        "/ip4/0.0.0.0/udp/42954/quic-v1",
         ),
         libp2p.EnableRelayService(relay.WithResources(relayResources)),
         libp2p.ResourceManager(rm),

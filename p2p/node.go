@@ -72,7 +72,7 @@ func InitHost(ctx context.Context, privKey crypto.PrivKey) (host.Host, error) {
 }
 func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
 
-    relayAddr, _ := multiaddr.NewMultiaddr("/ip4/144.31.152.128/tcp/4001/p2p/12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N")
+    relayAddr, _ := multiaddr.NewMultiaddr("/ip4/144.31.152.128/tcp/42954/p2p/12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N")
     relayInfo, _ := peer.AddrInfoFromP2pAddr(relayAddr)
     
     err := h.Connect(ctx, *relayInfo)
