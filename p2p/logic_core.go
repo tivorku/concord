@@ -2,7 +2,6 @@ package p2p
 
 import (
 	"fmt"
-	//"crypto/sha256"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -24,18 +23,19 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
-type Strategist struct {
+type LogicCore struct {
 	ledger   *Ledger
 	myLotID  string
 	volume   int
 	value    int
 	mu             sync.Mutex
+	myLastEpoch int64
 	lastMyShotTime time.Time
 	isExecuting    bool
 }
 
-func NewStrategist(l *Ledger, myLotID string, vol int, val int) *Strategist {
-	return &Strategist{
+func InitLogicCore(l *Ledger, myLotID string, vol int, val int) *LogicCore {
+	return &LogicCore{
 		ledger:  l,
 		myLotID: myLotID,
 		volume:  vol,
@@ -45,16 +45,16 @@ func NewStrategist(l *Ledger, myLotID string, vol int, val int) *Strategist {
 }
 
 // AnalyzeTarget — классифицирует лот на 1-м месте
-func (s *Strategist) AnalyzeTarget(topLotID string, isBot bool) bool {
+func (lc *LogicCore) AnalyzeTarget(topLotID string, isBot bool) bool {
 	// проверка на Бота Т2
 	if isBot {
 		return false
 	}
 
 	// проверка на союзника
-	s.ledger.mu.RLock()
-	_, isMember := s.ledger.Members[topLotID]
-	s.ledger.mu.RUnlock()
+	lc.ledger.mu.RLock()
+	_, isMember := lc.ledger.Members[topLotID]
+	lc.ledger.mu.RUnlock()
 
 	if isMember {
 		// если это наш лот или лот соседа
@@ -62,46 +62,26 @@ func (s *Strategist) AnalyzeTarget(topLotID string, isBot bool) bool {
 	}
 
 	// если это не бот и не участник сети — это посторонний
-	fmt.Printf("[СТРАТЕГ] Обнаружен посторонний на 1-м месте: %s\n", topLotID)
+	fmt.Printf("[Brain] Обнаружен посторонний на 1-м месте: %s\n", topLotID)
 	return true
 }
 
 // AmITheShooter — решает, является ли наша нода первой в очереди на выстрел
-func (s *Strategist) AmITheShooter() bool {
+func (lc *LogicCore) AmITheShooter() bool {
 
-	queue := s.ledger.GetSortedQueue()
+	queue := lc.ledger.GetSortedQueue()
 
 	// если в очереди наша нода единственная, стрелять нельзя
 	if len(queue) == 1 {
 		return false
 	}
     leaderLotID := queue[0]
-	if leaderLotID == s.myLotID {
-		fmt.Println("[СТРАТЕГ] Моя очередь! Я — лидер очереди.")
+	if leaderLotID == lc.myLotID {
+		fmt.Println("[Brain] Моя очередь!")
 		return true
 	}
-	fmt.Printf("[СТРАТЕГ] Жду очередь. Сейчас лидер: %s\n", leaderLotID)
+	fmt.Printf("[Brain] Жду очередь. Сейчас лидер: %s\n", leaderLotID)
 	return false
-}
-
-func (l *Ledger) GetSortedActivePeers() []peer.ID {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-
-	var active []peer.ID
-	for _, p := range l.Members {
-		// считаем живыми тех, кто подавал знак последние 60 секунд
-		if time.Since(p.LastSeen) < 1*time.Minute {
-			active = append(active, p.PeerID)
-		}
-	}
-
-	// сортировка обязательна для детерминизма!
-	sort.Slice(active, func(i, j int) bool {
-		return active[i].String() < active[j].String()
-	})
-
-	return active
 }
 func ClearScreen() {
 	var cmd *exec.Cmd
@@ -113,28 +93,28 @@ func ClearScreen() {
 	cmd.Stdout = os.Stdout
 	cmd.Run()
 }
-func (s *Strategist) ShowDashboard() {
+func (lc *LogicCore) ShowDashboard() {
 
 	ClearScreen()
 
 	fmt.Println("==================================================================")
-	fmt.Printf(" СЕГМЕНТ: %d ГБ / %d РУБ | ЛОТ: %s\n", s.volume, s.value, s.myLotID)
+	fmt.Printf(" СЕГМЕНТ: %d ГБ / %d РУБ | ЛОТ: %s\n", lc.volume, lc.value, lc.myLotID)
 	fmt.Println("==================================================================")
 	fmt.Printf("%-3s | %-12s | %-4s | %-4s | %-6s | %s\n", "#", "PeerID", "T", "R", "P", "Статус")
 	fmt.Println("------------------------------------------------------------------")
 
-	queue := s.ledger.GetSortedQueue()
+	queue := lc.ledger.GetSortedQueue()
 
-	s.ledger.mu.RLock()
-	defer s.ledger.mu.RUnlock()
+	lc.ledger.mu.RLock()
+	defer lc.ledger.mu.RUnlock()
 
 	for i, lotID := range queue {
-		p := s.ledger.Members[lotID]
+		p := lc.ledger.Members[lotID]
 		if p == nil { continue }
 		
 		// пометка "это я"
 		prefix := "  "
-		if lotID == s.myLotID {
+		if lotID == lc.myLotID {
 			prefix = ">>"
 		}
 
@@ -155,8 +135,8 @@ func (s *Strategist) ShowDashboard() {
 	fmt.Println("==================================================================")
 }
 
-func (s *Strategist) checkDutyRole(myID peer.ID, numDutyNodes int) bool {
-	activePeers := s.ledger.GetSortedActivePeers()
+func (lc *LogicCore) checkDutyRole(myID peer.ID, numDutyNodes int) bool {
+	activePeers := lc.ledger.GetSortedActivePeers()
 	if len(activePeers) == 0 {
 		return true
 	}
@@ -167,7 +147,7 @@ func (s *Strategist) checkDutyRole(myID peer.ID, numDutyNodes int) bool {
 	}
 
 	// создаем детерминированный рандом на основе времени
-	seed := time.Now().Unix() / 300 // окно 5 минут
+	seed := (time.Now().Unix() + networkTimeOffset) / 300 // окно 5 минут
 	rng := rand.New(rand.NewSource(seed))
 	// делаем копию списка и перемешиваем её
 	shuffled := make([]peer.ID, len(activePeers))
@@ -196,29 +176,56 @@ func (s *Strategist) checkDutyRole(myID peer.ID, numDutyNodes int) bool {
 	return isDuty
 }
 
-func (s *Strategist) broadcastRocketFired(topic *pubsub.Topic, myPeerID peer.ID, myT int64, myR int, joinedAt int64, lastTopTick int64) {
-	msg := NodeMessage{
-		Type:     "ROCKET_FIRED",
-		LotID:    s.myLotID,
-		PeerID:   myPeerID,
-		T:        myT,
-		R:        myR,
-		LastTopTick: lastTopTick,
-		JoinedAt: joinedAt,
+func (lc *LogicCore) broadcastRocketFired(mn *MarketNode) {
+    lc.ledger.mu.Lock()
+    if p, ok := lc.ledger.Members[lc.myLotID]; ok {
+		p.R++ // увеличиваем количество потраченных ракет
+		p.T = p.T + int64(rand.Intn(3)) + 1
+		p.LastTopTick = lc.ledger.GlobalTick
+		currentEpoch := GetCurrentEpoch()
+		// вещаем на всю сеть: "я потратился, мой приоритет упал"
+		msg := NodeMessage{
+    		Type:        "ROCKET_FIRED",
+    		LotID:       lc.myLotID,
+    		PeerID:      mn.Host.ID(),
+    		T:           p.T,
+    		R:           p.R,
+    		LastTopTick: p.LastTopTick,
+    		JoinedAt:    p.JoinedAt,
+    		GlobalTick:  lc.ledger.GlobalTick,
+            LastEpoch:   currentEpoch, 
+    	}
+    	lc.publish(mn.Topic, msg)
 	}
-	s.publish(topic, msg)
+	lc.ledger.mu.Unlock()
+	return
 }
-func (s *Strategist) broadcastTopStatus(topic *pubsub.Topic, info t2api.LotInfo, myPeerID peer.ID) {
+func (lc *LogicCore) broadcastTopStatus(mn *MarketNode, info t2api.LotInfo) {
 	msg := NodeMessage{
 		Type:  "TOP_STATUS",
 		LotID: info.ID, // ID того, кого мы увидели на 1 месте
-		PeerID: myPeerID,  
+		PeerID: mn.Host.ID(),  
 		IsBot: info.IsBot, // бот это или нет
 	}
-    s.publish(topic, msg)
+    lc.publish(mn.Topic, msg)
     
 }
-func (s *Strategist) publish(topic *pubsub.Topic, msg NodeMessage) {
+func (lc *LogicCore) broadcastSyncCorrection(m NodeMessage, mn *MarketNode) {
+    lc.ledger.mu.RLock()
+    p := lc.ledger.Members[m.LotID]
+    correction := NodeMessage{
+        Type:        "SYNC_CORRECTION",
+        LotID:       m.LotID,
+        PeerID:      m.PeerID,
+        T:           p.T,
+        R:           p.R,
+        LastEpoch:   p.LastEpoch,
+        GlobalTick:  lc.ledger.GlobalTick,
+    }
+    lc.ledger.mu.RUnlock()
+    go lc.publish(mn.Topic, correction)
+}
+func (lc *LogicCore) publish(topic *pubsub.Topic, msg NodeMessage) {
 	raw, _ := json.Marshal(msg)
 	topic.Publish(context.Background(), raw)
 }
@@ -234,16 +241,14 @@ func (c *StreamConn) SetDeadline(t time.Time) error      { return c.Stream.SetDe
 func (c *StreamConn) SetReadDeadline(t time.Time) error  { return c.Stream.SetReadDeadline(t) }
 func (c *StreamConn) SetWriteDeadline(t time.Time) error { return c.Stream.SetWriteDeadline(t) }
 
-func (s *Strategist) SelectRandomProxy(h host.Host, ctx context.Context) peer.ID {
-	s.ledger.mu.RLock()
-	defer s.ledger.mu.RUnlock()
+func (lc *LogicCore) SelectRandomProxy(h host.Host, ctx context.Context) peer.ID {
+	lc.ledger.mu.RLock()
+	defer lc.ledger.mu.RUnlock()
 
-	// создаем список потенциальных прокси
     uniquePeers := make(map[peer.ID]bool)
     var candidates []peer.ID
     
-	for _, participant := range s.ledger.Members {
-		// игнорируем себя
+	for _, participant := range lc.ledger.Members {
 		if participant.PeerID == h.ID() { continue }
 		
 		if !uniquePeers[participant.PeerID] {
@@ -253,52 +258,68 @@ func (s *Strategist) SelectRandomProxy(h host.Host, ctx context.Context) peer.ID
             }
         }
     }
-    
 	// если в Леджере никого на связи нет
 	if len(candidates) == 0 {
-		fmt.Println("[MDN] Прокси не найдено. Использую прямой запрос.")
+		fmt.Println("[Brain] Прокси не найдено. Использую прямой запрос.")
 		return "" 
 	}
 	
 	return candidates[rand.Intn(len(candidates))]
 }
-func (s *Strategist) Run(ctx context.Context, mn *MarketNode, bearer, number string) {
-	// запускаем фоновый цикл дежурного
-	go s.dutyLoop(ctx, mn)
-	// запускаем фоновый цикл анонсера (говорим сети, что мы живы)
-	go s.announceLoop(ctx, mn)
+func (lc *LogicCore) Run(ctx context.Context, mn *MarketNode, bearer, number string) {
+	go lc.dutyLoop(ctx, mn)
+	go lc.announceLoop(ctx, mn)
 }
-func (s *Strategist) HandleMessage(ctx context.Context, mn *MarketNode, m NodeMessage, bearer, number string) {
-    fmt.Printf("[DEBUG] Пришел тип: %s | Лот: %s | От: %s\n", m.Type, m.LotID, m.PeerID)
+func (lc *LogicCore) HandleMessage(ctx context.Context, mn *MarketNode, m NodeMessage, bearer, number string) {
+    fmt.Printf("[Debug] Пришел тип: %s | Лот: %s | От: %s\n", m.Type, m.LotID, m.PeerID)
 	switch m.Type {
     	case "ANNOUNCE", "ROCKET_FIRED":
-    	    s.ledger.mu.Lock()
-    	    if m.GlobalTick > s.ledger.GlobalTick {
-    	        s.ledger.GlobalTick = m.GlobalTick
+    	    lc.ledger.mu.Lock()
+    	    if m.GlobalTick > lc.ledger.GlobalTick {
+    	        lc.ledger.GlobalTick = m.GlobalTick
     	    }
-    	    s.ledger.mu.Unlock()
-    		s.ledger.Update(m.LotID, m.PeerID, m.T, m.R, m.JoinedAt, m.LastTopTick, m.GlobalTick)
+    	    lc.ledger.mu.Unlock()
+    		needsCorrection := lc.ledger.Update(m.LotID, m.PeerID, m.T, m.R, m.JoinedAt, m.LastTopTick, m.GlobalTick, m.LastEpoch)
+    		if needsCorrection && m.Type == "ANNOUNCE" {
+    		    go lc.broadcastSyncCorrection(m, mn)
+    		}
     
     	case "TOP_STATUS":
     		// инкрементируем тики для того, кто сейчас в топе
-    		s.ledger.UpdateTicks(m.LotID)
-    		status := s.AnalyzeTarget(m.LotID, m.IsBot)
+    		lc.ledger.UpdateTicks(m.LotID)
+    		status := lc.AnalyzeTarget(m.LotID, m.IsBot)
             
-    		if status && s.AmITheShooter() {
-    			s.mu.Lock()
-                if s.isExecuting {
-                    s.mu.Unlock()
+    		if status && lc.AmITheShooter() {
+    			lc.mu.Lock()
+                if lc.isExecuting {
+                    lc.mu.Unlock()
                     return // мы уже в процессе выстрела, игнорируем новые сигналы
                 }
-				s.isExecuting = true 
-                s.mu.Unlock()
-				go s.PerformExecution(ctx, mn, bearer, number)
+				lc.isExecuting = true 
+                lc.mu.Unlock()
+				go lc.PerformExecution(ctx, mn, bearer, number)
 			
     		}
+    	case "SYNC_CORRECTION":
+    	    if m.LotID == lc.myLotID {
+    	        lc.ledger.mu.Lock()
+                p, exists := lc.ledger.Members[lc.myLotID]
+    			if exists {
+    			    if m.LastEpoch == GetCurrentEpoch() {
+                        if m.T > p.T {
+                            p.T = m.T
+                        }
+                        if m.R > p.R {
+                            p.R = m.R
+                        }
+                    }
+    			}
+    			lc.ledger.mu.Unlock()
+            }
 	}
 }
 // wrapWithUTLS - маскировка. превращает "голый" стрим в "мобильное" соединение.
-func (s *Strategist) wrapWithUTLS(conn net.Conn) (net.Conn, error) {
+func (lc *LogicCore) wrapWithUTLS(conn net.Conn) (net.Conn, error) {
 	// настройка параметров (SNI)
 	config := &utls.Config{
 		ServerName: t2api.T2Host,
@@ -311,24 +332,22 @@ func (s *Strategist) wrapWithUTLS(conn net.Conn) (net.Conn, error) {
 	return uConn, nil
 }
 // PerformExecution — Главный процесс. Объединяет джиттер, прокси и отчетность.
-func (s *Strategist) PerformExecution(ctx context.Context, mn *MarketNode, bearer, number string) {
+func (lc *LogicCore) PerformExecution(ctx context.Context, mn *MarketNode, bearer, number string) {
 
     defer func() {
-		s.mu.Lock()
-		s.isExecuting = false
-		s.mu.Unlock()
+		lc.mu.Lock()
+		lc.isExecuting = false
+		lc.mu.Unlock()
 	}()
-    s.mu.Lock()
-	if time.Since(s.lastMyShotTime) < 5*time.Second {
-		s.mu.Unlock()
-		// мы недавно стреляли. пропускаем этот цикл, чтобы не злить антифрод.
-		fmt.Println("Уже недавно стреляли. Ждём 5 секунд")
+    lc.mu.Lock()
+	if time.Since(lc.lastMyShotTime) < 5*time.Second {
+		lc.mu.Unlock()
 		return 
 	}
-	s.lastMyShotTime = time.Now() // фиксируем попытку сразу
-	s.mu.Unlock()
+	lc.lastMyShotTime = time.Now() // фиксируем попытку сразу
+	lc.mu.Unlock()
 	wait := rand.Intn(1000)+2000
-	fmt.Printf("[MDN] Враг обнаружен! Имитирую раздумья (%d сек)...\n", wait/1000)
+	fmt.Printf("[Brain] Враг обнаружен! Имитирую раздумья (%d сек)...\n", wait/1000)
     
 	select {
 	case <-time.After(time.Duration(wait) * time.Millisecond):
@@ -336,44 +355,32 @@ func (s *Strategist) PerformExecution(ctx context.Context, mn *MarketNode, beare
 		return
 	}
 
-	// выбор пути (прокси или прямой выстрел)
-	proxyID := s.SelectRandomProxy(mn.Host, ctx)
+	proxyID := lc.SelectRandomProxy(mn.Host, ctx)
 	var client *http.Client
 
 	if proxyID == "" {
 		client = t2api.SharedClient
 	} else {
-		fmt.Printf("[MDN] Использую стелс-туннель через: %s\n", proxyID.String()[len(proxyID)-8:])
-		client = s.CreateProxiedClient(ctx, mn.Host, proxyID)
+		fmt.Printf("[Brain] Использую туннель через: %s\n", proxyID.String()[len(proxyID)-8:])
+		client = lc.CreateProxiedClient(ctx, mn.Host, proxyID)
 	}
 
 	// САМ ВЫСТРЕЛ
-	err := t2api.Rocket(client, bearer, number, s.myLotID)
-	//var err error = nil
+	/*err := */t2api.Rocket(client, bearer, number, lc.myLotID)
+	var err error
 	if err == nil {
 	   // fmt.Println("Успешная имитация ракеты!")
-		
-		// синхронизация своего состояния
-		s.ledger.mu.Lock()
-		if p, ok := s.ledger.Members[s.myLotID]; ok {
-			p.R++ // увеличиваем количество потраченных ракет
-			p.T = p.T + int64(rand.Intn(3)) + 1
-			p.LastTopTick = s.ledger.GlobalTick
-			// вещаем на всю сеть: "я потратился, мой приоритет упал"
-			s.broadcastRocketFired(mn.Topic, mn.Host.ID(), p.T, p.R, p.JoinedAt, p.LastTopTick)
-		}
-		s.ledger.mu.Unlock()
+		lc.broadcastRocketFired(mn)
 	} else {
-		fmt.Printf("[MDN] Выстрел не удался: %v\n", err)
+		fmt.Printf("[Brain] Выстрел не удался: %v\n", err)
 	}
 }
 
-func (s *Strategist) CreateProxiedClient(ctx context.Context, h host.Host, proxyPeerID peer.ID) *http.Client {
+func (lc *LogicCore) CreateProxiedClient(ctx context.Context, h host.Host, proxyPeerID peer.ID) *http.Client {
 	return &http.Client{
 		Timeout: 20 * time.Second,
 		Transport: &http.Transport{
 		    TLSNextProto:        make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
-			ForceAttemptHTTP2:   false,
 			DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				// открываем P2P стрим к соседу-посреднику
 				stream, err := h.NewStream(ctx, proxyPeerID, ProtocolProxy)
@@ -382,7 +389,7 @@ func (s *Strategist) CreateProxiedClient(ctx context.Context, h host.Host, proxy
 				}
 
 				// оборачиваем стрим в uTLS
-				uConn, err := s.wrapWithUTLS(&StreamConn{stream})
+				uConn, err := lc.wrapWithUTLS(&StreamConn{stream})
 				if err != nil {
 					stream.Reset()
 					return nil, err
@@ -394,7 +401,7 @@ func (s *Strategist) CreateProxiedClient(ctx context.Context, h host.Host, proxy
 		},
 	}
 }
-func (s *Strategist) dutyLoop(ctx context.Context, mn *MarketNode) {
+func (lc *LogicCore) dutyLoop(ctx context.Context, mn *MarketNode) {
 	ticker := time.NewTicker(3 * time.Second)
 	for {
 		select {
@@ -403,11 +410,11 @@ func (s *Strategist) dutyLoop(ctx context.Context, mn *MarketNode) {
 		case <-ticker.C:
 
 			// решаем, нужно ли нам стать дежурным принудительно
-			isDuty := s.checkDutyRole(mn.Host.ID(), 3)
+			isDuty := lc.checkDutyRole(mn.Host.ID(), 3)
 			if isDuty {
-				lots, err := t2api.GetTop4IDs(s.volume, s.value)
+				lots, err := t2api.GetTop4IDs(lc.volume, lc.value)
 				if err == nil && len(lots) > 0 {
-					s.broadcastTopStatus(mn.Topic, lots[0], mn.Host.ID())
+					lc.broadcastTopStatus(mn, lots[0])
 				} else {
 				    fmt.Println(err)
 				}
@@ -415,7 +422,7 @@ func (s *Strategist) dutyLoop(ctx context.Context, mn *MarketNode) {
 		}
 	}
 }
-func (s *Strategist) announceLoop(ctx context.Context, mn *MarketNode) {
+func (lc *LogicCore) announceLoop(ctx context.Context, mn *MarketNode) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -424,33 +431,39 @@ func (s *Strategist) announceLoop(ctx context.Context, mn *MarketNode) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.ledger.mu.RLock()
-			me, exists := s.ledger.Members[s.myLotID]
+			currentEpoch := GetCurrentEpoch()
+			lc.ledger.mu.Lock()
+			me, exists := lc.ledger.Members[lc.myLotID]
 			if !exists {
-				s.ledger.mu.RUnlock()
+				lc.ledger.mu.Unlock()
 				continue
 			}
-			s.ledger.GlobalTick++
-			// обновляем себя в своем же леджере
+			if currentEpoch > me.LastEpoch {
+				me.T /= 2
+				me.R /= 2
+				me.LastEpoch = currentEpoch
+			}
+			lc.ledger.GlobalTick++
 			myT := me.T
 			myR := me.R
 			myL := me.LastTopTick
 			myJ := me.JoinedAt
-			myG := s.ledger.GlobalTick
-			s.ledger.mu.RUnlock()
-			s.ledger.Update(s.myLotID, mn.Host.ID(), myT, myR, myJ, myL, myG)
-			
+			myG := lc.ledger.GlobalTick
+			myE := me.LastEpoch
+			lc.ledger.mu.Unlock()
+			lc.ledger.Update(lc.myLotID, mn.Host.ID(), myT, myR, myJ, myL, myG, myE)
 			msg := NodeMessage{
-				Type:     "ANNOUNCE",
-				LotID:    s.myLotID,
-				PeerID:   mn.Host.ID(),
-				T:        me.T,
-				R:        me.R,
-				JoinedAt: me.JoinedAt,
-				LastTopTick: me.LastTopTick,
-				GlobalTick: s.ledger.GlobalTick,
+				Type:        "ANNOUNCE",
+				LotID:       lc.myLotID,
+				PeerID:      mn.Host.ID(),
+				T:           myT,
+				R:           myR,
+				JoinedAt:    myJ,
+				LastTopTick: myL,
+				GlobalTick:  myG,
+				LastEpoch:   myE,
 			}
-			s.publish(mn.Topic, msg)
+			lc.publish(mn.Topic, msg)
 		}
 	}
 }

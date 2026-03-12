@@ -8,6 +8,8 @@ import (
 	"time"
 	"os"
 	"fmt"
+	"strconv"
+	"strings"
 	"encoding/json"
 	"crypto/sha256"
 	"market-denet/t2api"
@@ -26,9 +28,17 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/awnumar/memguard"
 	"net/http"
-	//ma "github.com/multiformats/go-multiaddr"
+	"github.com/libp2p/go-libp2p/p2p/net/swarm"
+	"github.com/libp2p/go-libp2p/core/control"
 )
+type ClientGater struct {
+    relayID peer.ID
+    relayIP string
+    pass    string
+    myID    peer.ID
+}
 var encryptedPepper = []byte{0XE9, 0X8C, 0XEC, 0XC9, 0XE1, 0XCF, 0XD1, 0XD0, 0X98, 0XD2, 0XE8, 0X8D, 0XC9, 0XC6, 0XD2, 0XDC, 0XD6, 0XF8, 0XFB, 0X8A}
+var networkTimeOffset int64
 const xorKey byte = 0xBE
 const ProtocolProxy protocol.ID = "/mdn/proxy/1.0.0"
 type NodeMessage struct {
@@ -38,6 +48,7 @@ type NodeMessage struct {
 	T      int64  `json:"t"` // тики
 	R      int    `json:"r"` // ракеты
 	JoinedAt int64 `json:"joined_at"`
+	LastEpoch int64 `json:"last_epoch_id"`
 	LastTopTick int64 `json:"last_top_tick"`
 	GlobalTick int64 `json:"global_tick"`
 	IsBot  bool   `json:"is_bot"`
@@ -51,8 +62,20 @@ type MarketNode struct {
 func InitHost(ctx context.Context, privKey crypto.PrivKey) (host.Host, error) {
     var h host.Host
     var err error
-    relayAddr, _ := multiaddr.NewMultiaddr("/ip4/144.31.152.128/tcp/4001/p2p/12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N")
+    relayAddr, _ := multiaddr.NewMultiaddr("/ip4/144.31.152.128/tcp/42954/p2p/12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N")
     info, _ := peer.AddrInfoFromP2pAddr(relayAddr)
+    myID, _ := peer.IDFromPrivateKey(privKey)
+
+    relayIP := "144.31.152.128"
+    relayIDStr := "12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N"
+    rid, _ := peer.Decode(relayIDStr)
+    sharedPass := "2a35442281f13052136c53589ae2f51b"
+    myGater := &ClientGater{
+        relayID: rid,
+        relayIP: relayIP,
+        pass:    sharedPass,
+        myID:    myID,
+    }
     h, err = libp2p.New(
 		libp2p.Identity(privKey),
 		libp2p.EnableRelay(),
@@ -60,6 +83,7 @@ func InitHost(ctx context.Context, privKey crypto.PrivKey) (host.Host, error) {
 		libp2p.NATPortMap(),
 		libp2p.EnableAutoNATv2(),
 		libp2p.ForceReachabilityPrivate(),
+		libp2p.ConnectionGater(myGater),
         libp2p.Transport(tcp.NewTCPTransport),
         libp2p.Transport(quic.NewTransport),
         libp2p.ListenAddrStrings(
@@ -74,18 +98,8 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
 
     relayAddr, _ := multiaddr.NewMultiaddr("/ip4/144.31.152.128/tcp/42954/p2p/12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N")
     relayInfo, _ := peer.AddrInfoFromP2pAddr(relayAddr)
+	go MaintainRelayConn(ctx, h, *relayInfo)
     
-    err := h.Connect(ctx, *relayInfo)
-    if err == nil {
-        authenticateAtRelay(ctx, h, relayInfo.ID)
-    } else {
-        fmt.Println(err)
-        os.Exit(1)
-    }
-   /* bootstrapPeers := dht.GetDefaultBootstrapPeerAddrInfos()
-    for _, pi := range bootstrapPeers {
-        go h.Connect(ctx, pi)
-    }*/
 	kad, err := dht.New(ctx, h, dht.Mode(dht.ModeClient), dht.BootstrapPeers(*relayInfo))
 	if err != nil {
 		panic(err)
@@ -104,6 +118,22 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
     	    util.Advertise(ctx, routingDiscovery, rendezvous)
 	    }
 	}()
+	relayID, _ := peer.Decode("12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N")
+    go func() {
+        for {
+            fmt.Println("\n[Debug] Текущие адреса:")
+                for _, addr := range h.Addrs() {
+                    fmt.Println(addr)
+                }
+            conns := h.Network().Conns()
+            if h.Network().Connectedness(relayID) == network.Connected {
+                fmt.Println("[Debug] Есть соединение с реле")
+            }
+            fmt.Printf("[Debug] Всего сетевых соединений: %d\n", len(conns))
+            fmt.Println("разница во времени:", networkTimeOffset)
+            time.Sleep(3 * time.Second)
+        }
+    }()
 	go func() {
 		for {
 			peersChan, err := routingDiscovery.FindPeers(ctx, rendezvous)
@@ -133,7 +163,7 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
 	}()
 	return
 }
-func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, s *Strategist, bearer, number string) (*pubsub.Topic, error) {
+func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, lc *LogicCore, bearer, number string) (*pubsub.Topic, error) {
     ps, _ := pubsub.NewGossipSub(ctx, h, pubsub.WithPeerExchange(true), pubsub.WithFloodPublish(true))
     topic, _ := ps.Join(topicName)
     sub, _ := topic.Subscribe()
@@ -152,14 +182,14 @@ func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, 
     go func() {
         mn := &MarketNode{Host: h, Topic: topic, Ledger: l, Ctx: ctx}
         for {
-            fmt.Printf("[DEBUG-PUBSUB] Соседей в топике %s: %d\n", topicName, len(topic.ListPeers()))
+            fmt.Printf("[Debug] Соседей в топике %s: %d\n", topicName, len(topic.ListPeers()))
             msg, err := sub.Next(ctx)
             if err != nil { return }
             senderPID := msg.ReceivedFrom
             if senderPID == h.ID() { continue }
             var m NodeMessage
             if err := json.Unmarshal(msg.Data, &m); err != nil { continue }
-            s.HandleMessage(ctx, mn, m, bearer, number)
+            lc.HandleMessage(ctx, mn, m, bearer, number)
         }
     }()
     return topic, nil
@@ -185,7 +215,7 @@ func (mn *MarketNode) RegisterProxyHandler() {
 		// используем net.Dial, потому что это выход из P2P-сети в обычный интернет
 		conn, err := net.DialTimeout("tcp", t2api.T2FullHost, 10*time.Second)
 		if err != nil {
-			fmt.Printf("[ПРОКСИ] Ошибка соединения с T2: %v\n", err)
+			fmt.Printf("[Proxy] Ошибка соединения с T2: %v\n", err)
 			stream.Reset()
 			return
 		}
@@ -212,29 +242,6 @@ func (mn *MarketNode) RegisterProxyHandler() {
 		}
 	})
 }
-func authenticateAtRelay(ctx context.Context, h host.Host, relayID peer.ID) error {
-	// открываем поток авторизации к реле
-	s, err := h.NewStream(ctx, relayID, "/mdn-private-auth/1.0.0")
-	if err != nil {
-		return err
-	}
-	defer s.Close()
-
-	// отправляем пароль
-	password := "2a35442281f13052136c53589ae2f51b"
-	_, err = s.Write([]byte(password))
-	if err != nil {
-		return err
-	}
-
-	buf := make([]byte, 2)
-	_, err = io.ReadFull(s, buf)
-	if string(buf) != "OK" {
-		fmt.Println("[Auth] Авторизация в реле прошла неудачно.")
-		os.Exit(1)
-	}
-	return err
-}
 func GetProtocolID(volume, value int) string {
     h := sha256.New()
     fmt.Fprintf(h, "%d-%d", volume, value)
@@ -256,9 +263,47 @@ func KnockToRelay(relayIP string, myID peer.ID, pass string) error {
 	if err != nil {
 		return err
 	}
+	body, _ := io.ReadAll(resp.Body)
+	respBody := string(body)
+    parts := strings.Split(respBody, ":")
+    if parts[0] == "OK" {
+        serverTime, _ := strconv.ParseInt(parts[1], 10, 64)
+        // Вычисляем, насколько наши часы врут относительно сервера
+        networkTimeOffset = serverTime - time.Now().Unix()
+    }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("shield rejected us")
+		return fmt.Errorf("[Auth] Shield rejected us")
 	}
 	return nil
+}
+func (g *ClientGater) InterceptPeerDial(p peer.ID) bool {
+    if p == g.relayID {
+        KnockToRelay(g.relayIP, g.myID, g.pass)
+    }
+    return true
+}
+func (g *ClientGater) InterceptAddrDial(peer.ID, multiaddr.Multiaddr) bool { return true }
+func (g *ClientGater) InterceptAccept(network.ConnMultiaddrs) bool { return true }
+func (g *ClientGater) InterceptSecured(network.Direction, peer.ID, network.ConnMultiaddrs) bool { return true }
+func (g *ClientGater) InterceptUpgraded(network.Conn) (bool, control.DisconnectReason) { return true, 0 }
+
+func MaintainRelayConn(ctx context.Context, h host.Host, relayInfo peer.AddrInfo) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+            if h.Network().Connectedness(relayInfo.ID) != network.Connected {
+                // мы оффлайн - реконнект
+                if s, ok := h.Network().(*swarm.Swarm); ok {
+                    s.Backoff().Clear(relayInfo.ID)
+                }
+                h.Connect(ctx, relayInfo)
+            }
+		}
+	}
 }

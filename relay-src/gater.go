@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
-
+    "time"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
@@ -67,7 +67,7 @@ func (g *RelayGater) InterceptAccept(addrs network.ConnMultiaddrs) bool {
 	g.w.mu.RLock()
 	defer g.w.mu.RUnlock()
 
-	// Пускаем только если IP в вайтлисте
+	// пускаем только если IP в вайтлисте
 	allowed := g.w.IPs[remoteIP.String()]
 	return allowed
 }
@@ -75,14 +75,14 @@ func (g *RelayGater) InterceptAccept(addrs network.ConnMultiaddrs) bool {
 // InterceptSecured — проверка PeerID после того, как Noise/TLS завершен
 func (g *RelayGater) InterceptSecured(dir network.Direction, p peer.ID, addrs network.ConnMultiaddrs) bool {
 	if dir == network.DirOutbound {
-		return true // Разрешаем реле самому звонить кому угодно
+		return true // разрешаем реле самому звонить кому угодно
 	}
 	g.w.mu.RLock()
 	defer g.w.mu.RUnlock()
 	return g.w.Peers[p]
 }
 
-// Остальные методы просто разрешаем (Dial всегда true, чтобы реле могло искать бутстрапы)
+// остальные методы просто разрешаем (Dial всегда true, чтобы реле могло искать бутстрапы)
 func (g *RelayGater) InterceptPeerDial(p peer.ID) bool { return true }
 func (g *RelayGater) InterceptAddrDial(peer.ID, multiaddr.Multiaddr) bool { return true }
 func (g *RelayGater) InterceptUpgraded(network.Conn) (bool, control.DisconnectReason) { return true, 0 }
@@ -103,12 +103,13 @@ func RunAuthServer(w *WhitelistManager, port string, password string) {
 			return
 		}
 
-		// Получаем реальный IP клиента
+		// получаем реальный IP клиента
 		host, _, _ := net.SplitHostPort(r.RemoteAddr)
 		
 		w.Add(pid, host)
-		fmt.Printf("[SHIELD] %s (IP: %s) successfully authorized\n", host, pid)
-		rw.Write([]byte("OK"))
+		fmt.Printf("[SHIELD] %s (IP: %s) successfully authorized\n", pid, host)
+		serverTime := time.Now().Unix()
+		fmt.Fprintf(rw, "OK:%d", serverTime)
 	})
 
 	fmt.Printf("[SHIELD] The registration server running on %s\n", port)

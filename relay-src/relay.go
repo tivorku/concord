@@ -39,8 +39,8 @@ func main() {
         }
     }
 
-    // 3. Запускаем HTTP сервер в фоне
-    go RunAuthServer(wm, "8080", "7370e4b93804e5cf4d2f38984dd8d27c")
+    go RunAuthServer(wm, "8080", password)
+    
 	relayResources := relay.DefaultResources()
     relayResources.MaxReservationsPerIP = 2
     relayResources.MaxCircuits = 16

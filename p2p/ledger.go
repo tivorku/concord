@@ -19,6 +19,7 @@ type Participant struct {
 	R         int
 	PriorityVar float64
 	LastTopTick int64
+	LastEpoch int64
 	GlobalTick int64
 	JoinedAt  int64
 	LastSeen  time.Time
@@ -38,10 +39,13 @@ func NewLedger() *Ledger {
 		Members: make(map[string]*Participant),
 	}
 }
-func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR int, joinedAt int64, lastTopTick int64, incomingTick int64) {
+func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR int, joinedAt int64, lastTopTick int64, incomingTick int64, incomingEpoch int64) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-
+    diff := incomingEpoch - GetCurrentEpoch()
+    if diff < -1 || diff > 1 {
+        return false
+    }
 	p, exists := l.Members[lotID]
 
 	if !exists {
@@ -54,26 +58,38 @@ func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR in
 			JoinedAt: joinedAt,
 			LastSeen: time.Now(),
 			GlobalTick: incomingTick,
+			LastEpoch: incomingEpoch,
 		}
-		return
+		return false
 	}
-	// если присоединился позже, чем в базе, то обновляем информацию
-	if joinedAt > p.JoinedAt {
-		p.JoinedAt = joinedAt // обновляем на более актуальное время
-	}
-	// если у соседа счетчик больше — подтягиваемся за ним
-    if incomingTick > l.GlobalTick {
-        l.GlobalTick = incomingTick
+	if incomingEpoch < p.LastEpoch {
+        return false 
     }
-	if lastTopTick > p.LastTopTick {
-	    p.LastTopTick = lastTopTick
+    if p.LastEpoch == incomingEpoch {
+        if incomingT < p.T || incomingR < p.R {
+            return true 
+        }
+	} else if incomingEpoch > p.LastEpoch {
+	    wasOnline := time.Since(p.LastSeen) < 20*time.Second
+        if wasOnline {
+            if incomingT < (p.T / 2) || incomingR < (p.R / 2) {
+                return true
+            }
+        } else {
+            if incomingT < p.T || incomingR < p.R {
+                return true
+            }
+        }
 	}
+	if joinedAt > p.JoinedAt { p.JoinedAt = joinedAt }
+    if incomingTick > l.GlobalTick { l.GlobalTick = incomingTick }
+    if lastTopTick > p.LastTopTick { p.LastTopTick = lastTopTick }
 
-	// синхронизация T и R
-	if incomingT != p.T { p.T = incomingT }
-	if incomingR != p.R { p.R = incomingR }
-	
+    p.T = incomingT
+    p.R = incomingR
+    p.LastEpoch = incomingEpoch
 	p.LastSeen = time.Now()
+	return false
 }
 // Item — вспомогательная структура для сортировки
 type Item struct {
@@ -82,7 +98,10 @@ type Item struct {
 	PeerID   string
 	JoinedAt int64
 }
-
+func GetCurrentEpoch() int64 {
+    networkUnix := time.Now().Unix() + networkTimeOffset
+    return networkUnix / 900
+}
 func (l *Ledger) GetSortedQueue() []string {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -106,13 +125,18 @@ func (l *Ledger) GetSortedQueue() []string {
     	}
     
     	// рассчитываем satiety
-    	// T — обычные циклы, R — ракеты (вес 1.2)
-    	satiety := float64(p.T) + (float64(p.R) * 1.2)
+    	// T — обычные циклы, R — ракеты (вес )
+    	satiety := (float64(p.T) * 0.05) + (float64(p.R) * 0.25)
     
     	// итоговая формула
     	// P = (S² + 0.01) / W
     	// победит тот, у кого число будет САМЫМ МАЛЕНЬКИМ
-        p.PriorityVar = ((satiety * satiety) + 0.01) / waitTime
+    	switch satiety {
+    	    case 0:
+    	        p.PriorityVar = 0.01 / waitTime
+    	    default:
+    	        p.PriorityVar = (satiety * satiety) / waitTime
+    	}
     
 
 		// проверка на карантин (20 минут)
@@ -150,9 +174,28 @@ func (l *Ledger) GetSortedQueue() []string {
 	}
 	return result
 }
+func (l *Ledger) GetSortedActivePeers() []peer.ID {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	var active []peer.ID
+	for _, p := range l.Members {
+		// считаем живыми тех, кто подавал знак последние 10 секунд
+		if time.Since(p.LastSeen) <= 10*time.Second {
+			active = append(active, p.PeerID)
+		}
+	}
+
+	// сортировка обязательна для детерминизма!
+	sort.Slice(active, func(i, j int) bool {
+		return active[i].String() < active[j].String()
+	})
+
+	return active
+}
 func (l *Ledger) StartJanitor(ctx context.Context) {
-	// будем проверять список раз в минуту
-	ticker := time.NewTicker(1 * time.Minute)
+	// будем проверять список раз в 5 минут
+	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
@@ -164,8 +207,8 @@ func (l *Ledger) StartJanitor(ctx context.Context) {
 			now := time.Now()
 
 			for id, p := range l.Members {
-				// если мы не слышали о ноде больше 2 минут — она ушла из сети
-				if now.Sub(p.LastSeen) > 2*time.Minute {
+				// если мы не слышали о ноде больше 30 минут — она ушла из сети
+				if now.Sub(p.LastSeen) > 30*time.Minute {
 					delete(l.Members, id)
 				}
 			}
