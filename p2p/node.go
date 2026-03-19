@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"encoding/json"
+//	"encoding/json"
 	"crypto/sha256"
 	"market-denet/t2api"
 	"github.com/libp2p/go-libp2p"
@@ -28,6 +28,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/awnumar/memguard"
 	"net/http"
+	"market-denet/pb"
+	"google.golang.org/protobuf/proto"
 	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 	"github.com/libp2p/go-libp2p/core/control"
 )
@@ -40,20 +42,26 @@ type ClientGater struct {
 var encryptedPepper = []byte{0XE9, 0X8C, 0XEC, 0XC9, 0XE1, 0XCF, 0XD1, 0XD0, 0X98, 0XD2, 0XE8, 0X8D, 0XC9, 0XC6, 0XD2, 0XDC, 0XD6, 0XF8, 0XFB, 0X8A}
 var networkTimeOffset int64
 const xorKey byte = 0xBE
+var (
+    relayAddr, _ = multiaddr.NewMultiaddr("/ip4/144.31.152.128/tcp/42954/p2p/12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N")
+    relayInfo, _ = peer.AddrInfoFromP2pAddr(relayAddr)
+    relayIP = "144.31.152.128"
+    relayID, _ = peer.Decode("12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N")
+    sharedPass = "2a35442281f13052136c53589ae2f51b")
 const ProtocolProxy protocol.ID = "/mdn/proxy/1.0.0"
 type NodeMessage struct {
-	Type   string `json:"type"`  // ANNOUNCE, ROCKET_FIRED, TOP_STATUS
+	Type   string `json:"type"`  // ANNOUNCE, ROCKET, TOP, SYNC
 	LotID  string `json:"lot_id"`
 	PeerID peer.ID `json:"peer_id"`
 	T      int64  `json:"t"` // тики
-	R      int    `json:"r"` // ракеты
+	R      int64    `json:"r"` // ракеты
 	JoinedAt int64 `json:"joined_at"`
 	LastEpoch int64 `json:"last_epoch_id"`
 	LastTopTick int64 `json:"last_top_tick"`
 	GlobalTick int64 `json:"global_tick"`
 	IsBot  bool   `json:"is_bot"`
 }
-type MarketNode struct {
+type Node struct {
 	Host    host.Host
 	Topic   *pubsub.Topic
 	Ledger  *Ledger
@@ -62,16 +70,11 @@ type MarketNode struct {
 func InitHost(ctx context.Context, privKey crypto.PrivKey) (host.Host, error) {
     var h host.Host
     var err error
-    relayAddr, _ := multiaddr.NewMultiaddr("/ip4/144.31.152.128/tcp/42954/p2p/12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N")
-    info, _ := peer.AddrInfoFromP2pAddr(relayAddr)
+    
     myID, _ := peer.IDFromPrivateKey(privKey)
 
-    relayIP := "144.31.152.128"
-    relayIDStr := "12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N"
-    rid, _ := peer.Decode(relayIDStr)
-    sharedPass := "2a35442281f13052136c53589ae2f51b"
     myGater := &ClientGater{
-        relayID: rid,
+        relayID: relayID,
         relayIP: relayIP,
         pass:    sharedPass,
         myID:    myID,
@@ -89,15 +92,15 @@ func InitHost(ctx context.Context, privKey crypto.PrivKey) (host.Host, error) {
         libp2p.ListenAddrStrings(
             "/ip4/0.0.0.0/tcp/0",
             "/ip4/0.0.0.0/udp/0/quic-v1",
+            "/ip6/::/tcp/0",
+            "/ip6/::/udp/0/quic-v1",
         ),
-		libp2p.EnableAutoRelayWithStaticRelays([]peer.AddrInfo{*info}),
+		libp2p.EnableAutoRelayWithStaticRelays([]peer.AddrInfo{*relayInfo}),
     )
 	return h, err
 }
 func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
 
-    relayAddr, _ := multiaddr.NewMultiaddr("/ip4/144.31.152.128/tcp/42954/p2p/12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N")
-    relayInfo, _ := peer.AddrInfoFromP2pAddr(relayAddr)
 	go MaintainRelayConn(ctx, h, *relayInfo)
     
 	kad, err := dht.New(ctx, h, dht.Mode(dht.ModeClient), dht.BootstrapPeers(*relayInfo))
@@ -118,7 +121,6 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
     	    util.Advertise(ctx, routingDiscovery, rendezvous)
 	    }
 	}()
-	relayID, _ := peer.Decode("12D3KooWS8gfSiFMenXBPDdyCqEDKsUJZXTby1nENpCjt2hLwS3N")
     go func() {
         for {
             fmt.Println("\n[Debug] Текущие адреса:")
@@ -180,16 +182,32 @@ func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, 
         }
     }()
     go func() {
-        mn := &MarketNode{Host: h, Topic: topic, Ledger: l, Ctx: ctx}
+        node := &Node{Host: h, Topic: topic, Ledger: l, Ctx: ctx}
         for {
             fmt.Printf("[Debug] Соседей в топике %s: %d\n", topicName, len(topic.ListPeers()))
             msg, err := sub.Next(ctx)
             if err != nil { return }
             senderPID := msg.ReceivedFrom
             if senderPID == h.ID() { continue }
-            var m NodeMessage
-            if err := json.Unmarshal(msg.Data, &m); err != nil { continue }
-            lc.HandleMessage(ctx, mn, m, bearer, number)
+            var pm pb.NodeMessage
+            if err := proto.Unmarshal(msg.Data, &pm); err != nil { continue }
+            pID, err := peer.Decode(pm.PeerId)
+            if err != nil { 
+                continue
+            }
+            m := NodeMessage{
+                Type:        pm.Type,
+                LotID:       pm.LotId,
+                PeerID:      pID,
+                T:           pm.T,
+                R:           pm.R,
+                JoinedAt:    pm.JoinedAt,
+                LastEpoch:   pm.LastEpoch,
+                LastTopTick: pm.LastTopTick,
+                GlobalTick:  pm.GlobalTick,
+                IsBot:       pm.IsBot,
+            }
+            lc.HandleMessage(ctx, node, m, bearer, number)
         }
     }()
     return topic, nil
@@ -207,9 +225,9 @@ func GetPrivateKey(path string) (crypto.PrivKey, error) {
 }
 
 // RegisterProxyHandler — настраивает ноду на роль "посредника"
-func (mn *MarketNode) RegisterProxyHandler() {
+func (node *Node) RegisterProxyHandler() {
 	// мы говорим хосту: "Если кто-то обратится по этому ID протокола — запусти эту функцию"
-	mn.Host.SetStreamHandler(ProtocolProxy, func(stream network.Stream) {
+	node.Host.SetStreamHandler(ProtocolProxy, func(stream network.Stream) {
 		defer stream.Close()
 
 		// используем net.Dial, потому что это выход из P2P-сети в обычный интернет

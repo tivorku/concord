@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+option go_package = "./pb";
+package message;
+
+message NodeMessage {
+  string type = 1;          
+  string lot_id = 2;
+  string peer_id = 3;
+  int64 t = 4;
+  int64 r = 5;
+  int64 joined_at = 6;
+  int64 last_epoch = 7;
+  int64 last_top_tick = 8;
+  int64 global_tick = 9;
+  bool is_bot = 10;
+}

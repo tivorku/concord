@@ -10,8 +10,6 @@ import (
 	"os"
 	"runtime"
 	"strings"
-	"strconv"
-	"math/rand/v2"
 	"time"
 
 )
@@ -21,17 +19,16 @@ func main() {
 	defer cancel()
 
 	myLedger := p2p.NewLedger()
-	go myLedger.StartJanitor(ctx)
 
 	bearer, number := t2api.Login()
-	//myLotID, volume, value, err := t2api.ShowAndSelectLot(bearer, number)
-	/*if err != nil {
+	/*myLotID, volume, value, err := t2api.ShowAndSelectLot(bearer, number)
+	if err != nil {
 	    fmt.Println(err)
 	}*/
+	
 	// MOCKING myLotID FOR TESTING
-	min := int64(10_000_000_000_000_000)
-	max := int64(100_000_000_000_000_000)
-	myLotID := strconv.Itoa(int(rand.Int64N(max-min) + min))
+	LotBytes, _ := os.ReadFile("lotid.txt")
+	myLotID := string(LotBytes)
 	var (
 	    volume int = 1
 	    value int = 15
@@ -49,13 +46,14 @@ func main() {
 	
 	p2p.StartDiscovery(ctx, h, rendezvous)
 	
-	mn := &p2p.MarketNode{Host: h, Ledger: myLedger, Ctx: ctx}
+	node := &p2p.Node{Host: h, Ledger: myLedger, Ctx: ctx}
+	go myLedger.StartJanitor(ctx, node)
 	core := p2p.InitLogicCore(myLedger, myLotID, volume, value)
-	mn.RegisterProxyHandler()
+	node.RegisterProxyHandler()
 	
-	mn.Topic, _ = p2p.StartPubSub(ctx, h, rendezvous, myLedger, core, bearer, number)
+	node.Topic, _ = p2p.StartPubSub(ctx, h, rendezvous, myLedger, core, bearer, number)
 	
-	go core.Run(ctx, mn, bearer, number)
+	go core.Run(ctx, node, bearer, number)
 	
 	go func() {
         for {
@@ -63,7 +61,7 @@ func main() {
             case <-ctx.Done():
                 return
             default:
-                core.ShowDashboard()
+                core.ShowDashboard(node)
                 time.Sleep(5 * time.Second) 
             }
         }

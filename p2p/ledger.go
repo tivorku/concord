@@ -16,7 +16,7 @@ type Participant struct {
 	LotID     string
 	PeerID    peer.ID
 	T         int64
-	R         int
+	R         int64
 	PriorityVar float64
 	LastTopTick int64
 	LastEpoch int64
@@ -39,7 +39,7 @@ func NewLedger() *Ledger {
 		Members: make(map[string]*Participant),
 	}
 }
-func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR int, joinedAt int64, lastTopTick int64, incomingTick int64, incomingEpoch int64) bool {
+func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR int64, joinedAt int64, lastTopTick int64, incomingTick int64, incomingEpoch int64) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
     diff := incomingEpoch - GetCurrentEpoch()
@@ -102,15 +102,15 @@ func GetCurrentEpoch() int64 {
     networkUnix := time.Now().Unix() + networkTimeOffset
     return networkUnix / 900
 }
-func (l *Ledger) GetSortedQueue() []string {
+func (l *Ledger) GetSortedQueue(node *Node) []string {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	
 	var activeItems []Item
 
 	for id, p := range l.Members {
-		// игнорируем тех, кто молчит дольше 10 секунд (оффлайн)
-		if time.Since(p.LastSeen) > 10*time.Second {
+		// игнорируем тех, кто молчит дольше 15 секунд (оффлайн), кроме себя
+		if time.Since(p.LastSeen) > 15*time.Second && p.PeerID != node.Host.ID() {
 			continue
 		}
 
@@ -174,14 +174,14 @@ func (l *Ledger) GetSortedQueue() []string {
 	}
 	return result
 }
-func (l *Ledger) GetSortedActivePeers() []peer.ID {
+func (l *Ledger) GetSortedActivePeers(node *Node) []peer.ID {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
 	var active []peer.ID
 	for _, p := range l.Members {
-		// считаем живыми тех, кто подавал знак последние 10 секунд
-		if time.Since(p.LastSeen) <= 10*time.Second {
+		// считаем живыми тех, кто подавал знак последние 10 секунд и себя
+		if time.Since(p.LastSeen) <= 10*time.Second || p.PeerID == node.Host.ID(){
 			active = append(active, p.PeerID)
 		}
 	}
@@ -193,7 +193,7 @@ func (l *Ledger) GetSortedActivePeers() []peer.ID {
 
 	return active
 }
-func (l *Ledger) StartJanitor(ctx context.Context) {
+func (l *Ledger) StartJanitor(ctx context.Context, node *Node) {
 	// будем проверять список раз в 5 минут
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
@@ -208,7 +208,7 @@ func (l *Ledger) StartJanitor(ctx context.Context) {
 
 			for id, p := range l.Members {
 				// если мы не слышали о ноде больше 30 минут — она ушла из сети
-				if now.Sub(p.LastSeen) > 30*time.Minute {
+				if now.Sub(p.LastSeen) > 30*time.Minute && p.PeerID != node.Host.ID() {
 					delete(l.Members, id)
 				}
 			}

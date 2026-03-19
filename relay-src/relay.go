@@ -40,20 +40,10 @@ func main() {
     }
 
     go RunAuthServer(wm, "8080", password)
-    
-	relayResources := relay.DefaultResources()
-    relayResources.MaxReservationsPerIP = 2
-    relayResources.MaxCircuits = 16
-    relayResources.ReservationTTL = 30 * time.Minute
-    relayResources.BufferSize = 2048
-    relayResources.Limit = &relay.RelayLimit{
-        Duration: 1 * time.Minute,
-        Data: 128 << 10,
-    }
-    
+
     cm, err := connmgr.NewConnManager(
-		30, // Low water mark
-		80, // High water mark
+		256, // Low water mark
+		512, // High water mark
 		connmgr.WithGracePeriod(time.Minute),
 	)
 	if err != nil {
@@ -77,17 +67,14 @@ func main() {
         },
         Protocol: map[protocol.ID]rcmgr.ResourceLimits{
             "/ipfs/kad/1.0.0": {
-                StreamsInbound:  rcmgr.LimitVal(64),
+                StreamsInbound:  rcmgr.LimitVal(128),
                 StreamsOutbound: rcmgr.LimitVal(256),
                 Memory:          64 << 20,
             },
             "/ipfs/id/1.0.0": {
-                StreamsInbound:  rcmgr.LimitVal(32),
-                StreamsOutbound: rcmgr.LimitVal(32),
+                StreamsInbound:  rcmgr.LimitVal(64),
+                StreamsOutbound: rcmgr.LimitVal(64),
                 Memory:          64 << 20,
-            },
-            "/ipfs/id/push/1.0.0": {
-                StreamsOutbound: rcmgr.BlockAllLimit,
             },
         },
     }
@@ -102,8 +89,10 @@ func main() {
 		libp2p.ListenAddrStrings(
         "/ip4/0.0.0.0/tcp/42954",
         "/ip4/0.0.0.0/udp/42954/quic-v1",
+        "/ip6/::/tcp/42954",
+        "/ip6/::/udp/42954/quic-v1",
         ),
-        libp2p.EnableRelayService(relay.WithResources(relayResources)),
+        libp2p.EnableRelayService(relay.WithResources(relay.DefaultResources())),
         libp2p.ResourceManager(rm),
         libp2p.ConnectionManager(cm),
         libp2p.EnableNATService(),
