@@ -6,13 +6,14 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"sync"
     "time"
+    "sync"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/libp2p/go-libp2p/core/control"
+	"github.com/libp2p/go-libp2p/core/host"
 )
 
 // WhitelistManager хранит разрешенные IP и PeerID
@@ -87,7 +88,7 @@ func (g *RelayGater) InterceptPeerDial(p peer.ID) bool { return true }
 func (g *RelayGater) InterceptAddrDial(peer.ID, multiaddr.Multiaddr) bool { return true }
 func (g *RelayGater) InterceptUpgraded(network.Conn) (bool, control.DisconnectReason) { return true, 0 }
 
-func RunAuthServer(w *WhitelistManager, port string, password string) {
+func RunAuthServer(w *WhitelistManager, port string, password string, h host.Host) {
 	http.HandleFunc("/register", func(rw http.ResponseWriter, r *http.Request) {
 		idStr := r.URL.Query().Get("id")
 		pass := r.URL.Query().Get("pass")
@@ -107,6 +108,7 @@ func RunAuthServer(w *WhitelistManager, port string, password string) {
 		host, _, _ := net.SplitHostPort(r.RemoteAddr)
 		
 		w.Add(pid, host)
+		h.ConnManager().Protect(pid, "auth-client")
 		fmt.Printf("[SHIELD] %s (IP: %s) successfully authorized\n", pid, host)
 		serverTime := time.Now().Unix()
 		fmt.Fprintf(rw, "OK:%d", serverTime)

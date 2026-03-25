@@ -4,7 +4,6 @@ import (
 	"context"
 	"log"
     "time"
-    "sync"
     "runtime"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
@@ -13,18 +12,15 @@ import (
 	"encoding/hex"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	
 	connmgr "github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/protocol"
+		
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	manet "github.com/multiformats/go-multiaddr/net"
 )
-var (
-	trustedPeers = make(map[peer.ID]bool)
-	authMu       sync.RWMutex
-	password     = "2a35442281f13052136c53589ae2f51b"
-	bootstrapIDs = make(map[peer.ID]bool)
-)
+var password = "2a35442281f13052136c53589ae2f51b"
 func init() {
     runtime.GOMAXPROCS(1)
 }
@@ -38,8 +34,6 @@ func main() {
             wm.IPs[ip.String()] = true
         }
     }
-
-    go RunAuthServer(wm, "8080", password)
 
     cm, err := connmgr.NewConnManager(
 		256, // Low water mark
@@ -55,25 +49,24 @@ func main() {
     concreteLimits := scalingLimits.Scale(1<<30, 1024) 
     cfg := rcmgr.PartialLimitConfig{
         System: rcmgr.ResourceLimits{
-            ConnsInbound:     rcmgr.LimitVal(128), 
-            ConnsOutbound:    rcmgr.LimitVal(128),
-            StreamsInbound:   rcmgr.LimitVal(256),
-            StreamsOutbound:  rcmgr.LimitVal(512),
+            ConnsInbound:     rcmgr.LimitVal(512), 
+            StreamsInbound:   rcmgr.LimitVal(512),
+            Memory:          128 << 20,
         },
         Transient: rcmgr.ResourceLimits{
-            ConnsInbound:    rcmgr.LimitVal(24),  
-            ConnsOutbound:   rcmgr.LimitVal(16),
-            StreamsInbound:  rcmgr.LimitVal(16),
+            ConnsInbound:    rcmgr.LimitVal(256),  
+            ConnsOutbound:   rcmgr.LimitVal(256),
+            StreamsInbound:  rcmgr.LimitVal(512),
         },
         Protocol: map[protocol.ID]rcmgr.ResourceLimits{
             "/ipfs/kad/1.0.0": {
-                StreamsInbound:  rcmgr.LimitVal(128),
-                StreamsOutbound: rcmgr.LimitVal(256),
+                StreamsInbound:  rcmgr.LimitVal(512),
+                StreamsOutbound: rcmgr.LimitVal(512),
                 Memory:          64 << 20,
             },
             "/ipfs/id/1.0.0": {
-                StreamsInbound:  rcmgr.LimitVal(64),
-                StreamsOutbound: rcmgr.LimitVal(64),
+                StreamsInbound:  rcmgr.LimitVal(128),
+                StreamsOutbound: rcmgr.LimitVal(128),
                 Memory:          64 << 20,
             },
         },
@@ -84,6 +77,8 @@ func main() {
     if err != nil {
         panic(err)
     }
+    myResources := relay.DefaultResources()
+    myResources.Limit.Duration = 30 * time.Minute
 	h, err := libp2p.New(
 	    libp2p.Identity(privKey),
 		libp2p.ListenAddrStrings(
@@ -92,7 +87,7 @@ func main() {
         "/ip6/::/tcp/42954",
         "/ip6/::/udp/42954/quic-v1",
         ),
-        libp2p.EnableRelayService(relay.WithResources(relay.DefaultResources())),
+        libp2p.EnableRelayService(relay.WithResources(myResources)),
         libp2p.ResourceManager(rm),
         libp2p.ConnectionManager(cm),
         libp2p.EnableNATService(),
@@ -104,9 +99,9 @@ func main() {
 		panic(err)
 	}
 	defer h.Close()
-    
+    go RunAuthServer(wm, "8080", password, h)
     bootstrapPeers := dht.GetDefaultBootstrapPeerAddrInfos()
-    kad, err := dht.New(ctx, h, dht.Mode(dht.ModeServer), dht.BootstrapPeers(bootstrapPeers...), dht.Concurrency(1), dht.RoutingTableRefreshPeriod(1 * time.Hour))
+    kad, err := dht.New(ctx, h, dht.Mode(dht.ModeServer), dht.BootstrapPeers(bootstrapPeers...))
     if err != nil {
         panic(err)
     }

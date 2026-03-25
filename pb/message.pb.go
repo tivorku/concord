@@ -31,8 +31,9 @@ type NodeMessage struct {
 	JoinedAt      int64                  `protobuf:"varint,6,opt,name=joined_at,json=joinedAt,proto3" json:"joined_at,omitempty"`
 	LastEpoch     int64                  `protobuf:"varint,7,opt,name=last_epoch,json=lastEpoch,proto3" json:"last_epoch,omitempty"`
 	LastTopTick   int64                  `protobuf:"varint,8,opt,name=last_top_tick,json=lastTopTick,proto3" json:"last_top_tick,omitempty"`
-	GlobalTick    int64                  `protobuf:"varint,9,opt,name=global_tick,json=globalTick,proto3" json:"global_tick,omitempty"`
-	IsBot         bool                   `protobuf:"varint,10,opt,name=is_bot,json=isBot,proto3" json:"is_bot,omitempty"`
+	IsBot         bool                   `protobuf:"varint,9,opt,name=is_bot,json=isBot,proto3" json:"is_bot,omitempty"`
+	License       []byte                 `protobuf:"bytes,10,opt,name=license,proto3" json:"license,omitempty"`
+	MsgSig        []byte                 `protobuf:"bytes,11,opt,name=msg_sig,json=msgSig,proto3" json:"msg_sig,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -123,13 +124,6 @@ func (x *NodeMessage) GetLastTopTick() int64 {
 	return 0
 }
 
-func (x *NodeMessage) GetGlobalTick() int64 {
-	if x != nil {
-		return x.GlobalTick
-	}
-	return 0
-}
-
 func (x *NodeMessage) GetIsBot() bool {
 	if x != nil {
 		return x.IsBot
@@ -137,11 +131,25 @@ func (x *NodeMessage) GetIsBot() bool {
 	return false
 }
 
+func (x *NodeMessage) GetLicense() []byte {
+	if x != nil {
+		return x.License
+	}
+	return nil
+}
+
+func (x *NodeMessage) GetMsgSig() []byte {
+	if x != nil {
+		return x.MsgSig
+	}
+	return nil
+}
+
 var File_message_proto protoreflect.FileDescriptor
 
 const file_message_proto_rawDesc = "" +
 	"\n" +
-	"\rmessage.proto\x12\amessage\"\x85\x02\n" +
+	"\rmessage.proto\x12\amessage\"\x97\x02\n" +
 	"\vNodeMessage\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x15\n" +
 	"\x06lot_id\x18\x02 \x01(\tR\x05lotId\x12\x17\n" +
@@ -151,11 +159,11 @@ const file_message_proto_rawDesc = "" +
 	"\tjoined_at\x18\x06 \x01(\x03R\bjoinedAt\x12\x1d\n" +
 	"\n" +
 	"last_epoch\x18\a \x01(\x03R\tlastEpoch\x12\"\n" +
-	"\rlast_top_tick\x18\b \x01(\x03R\vlastTopTick\x12\x1f\n" +
-	"\vglobal_tick\x18\t \x01(\x03R\n" +
-	"globalTick\x12\x15\n" +
-	"\x06is_bot\x18\n" +
-	" \x01(\bR\x05isBotB\x06Z\x04./pbb\x06proto3"
+	"\rlast_top_tick\x18\b \x01(\x03R\vlastTopTick\x12\x15\n" +
+	"\x06is_bot\x18\t \x01(\bR\x05isBot\x12\x18\n" +
+	"\alicense\x18\n" +
+	" \x01(\fR\alicense\x12\x17\n" +
+	"\amsg_sig\x18\v \x01(\fR\x06msgSigB\x06Z\x04./pbb\x06proto3"
 
 var (
 	file_message_proto_rawDescOnce sync.Once

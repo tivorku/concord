@@ -7,9 +7,9 @@ import (
     "context"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
-var (
+/*var (
     PriorityVar float64
-)
+)*/
 // Participant — это запись об одном конкретном лоте в сети.
 // это то, что наша нода будет помнить о каждом участнике сети.
 type Participant struct {
@@ -18,16 +18,15 @@ type Participant struct {
 	T         int64
 	R         int64
 	PriorityVar float64
+	WaitTime  int64
 	LastTopTick int64
 	LastEpoch int64
-	GlobalTick int64
 	JoinedAt  int64
 	LastSeen  time.Time
 }
 // Ledger — это общая память сети. 
 // каждая нода хранит свою копию этой структуры.
 type Ledger struct {
-    GlobalTick int64
 	mu      sync.RWMutex
 	Members map[string]*Participant // карта всех лотов: ключ — это LotID
 }
@@ -39,7 +38,7 @@ func NewLedger() *Ledger {
 		Members: make(map[string]*Participant),
 	}
 }
-func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR int64, joinedAt int64, lastTopTick int64, incomingTick int64, incomingEpoch int64) bool {
+func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR int64, joinedAt int64, lastTopTick int64, incomingEpoch int64) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
     diff := incomingEpoch - GetCurrentEpoch()
@@ -57,7 +56,6 @@ func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR in
 			LastTopTick: lastTopTick,
 			JoinedAt: joinedAt,
 			LastSeen: time.Now(),
-			GlobalTick: incomingTick,
 			LastEpoch: incomingEpoch,
 		}
 		return false
@@ -82,11 +80,14 @@ func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR in
         }
 	}
 	if joinedAt > p.JoinedAt { p.JoinedAt = joinedAt }
-    if incomingTick > l.GlobalTick { l.GlobalTick = incomingTick }
     if lastTopTick > p.LastTopTick { p.LastTopTick = lastTopTick }
-
-    p.T = incomingT
-    p.R = incomingR
+    
+    if incomingT > p.T {
+        p.T = incomingT   
+    }
+    if incomingR > p.R {
+        p.R = incomingR
+    }
     p.LastEpoch = incomingEpoch
 	p.LastSeen = time.Now()
 	return false
@@ -99,12 +100,11 @@ type Item struct {
 	JoinedAt int64
 }
 func GetCurrentEpoch() int64 {
-    networkUnix := time.Now().Unix() + networkTimeOffset
+    networkUnix := time.Now().Unix() + NetworkTimeOffset
     return networkUnix / 900
 }
 func (l *Ledger) GetSortedQueue(node *Node) []string {
 	l.mu.RLock()
-	defer l.mu.RUnlock()
 	
 	var activeItems []Item
 
@@ -114,31 +114,27 @@ func (l *Ledger) GetSortedQueue(node *Node) []string {
 			continue
 		}
 
-    	lastActivity := p.LastTopTick
-    	if lastActivity == 0 {
-    		lastActivity = p.JoinedAt
+    	
+    	if p.LastTopTick == 0 {
+    	    p.WaitTime = time.Now().Unix() + NetworkTimeOffset - p.JoinedAt + NetworkTimeOffset
+    	} else {
+    	    p.WaitTime = time.Now().Unix() + NetworkTimeOffset - p.LastTopTick
     	}
-    
-    	waitTime := float64(p.GlobalTick - lastActivity)
-    	if waitTime < 1 {
-    		waitTime = 1 // защита от деления на 0
+    	if p.WaitTime < 1 {
+    	    p.WaitTime = 1 // защита от деления на 0
     	}
     
     	// рассчитываем satiety
-    	// T — обычные циклы, R — ракеты (вес )
-    	satiety := (float64(p.T) * 0.05) + (float64(p.R) * 0.25)
+    	// T — обычные циклы, R — ракеты
+    	satiety := (float64(p.T) * 0.1) + (float64(p.R) * 0.5)
     
     	// итоговая формула
-    	// P = (S² + 0.01) / W
+    	// P = S² / W
     	// победит тот, у кого число будет САМЫМ МАЛЕНЬКИМ
-    	switch satiety {
-    	    case 0:
-    	        p.PriorityVar = 0.01 / waitTime
-    	    default:
-    	        p.PriorityVar = (satiety * satiety) / waitTime
-    	}
-    
-
+    	if satiety == 0 {
+            satiety = 1
+        }
+        p.PriorityVar = (satiety * satiety) / (float64(p.WaitTime))
 		// проверка на карантин (20 минут)
 		/*now := time.Now().Unix()
 		if now-p.JoinedAt < 1200 {
@@ -152,7 +148,6 @@ func (l *Ledger) GetSortedQueue(node *Node) []string {
 			JoinedAt: p.JoinedAt, // понадобится для Tie-break
 		})
 	}
-
 	// детерминированная сортировка
 	sort.Slice(activeItems, func(i, j int) bool {
 		// сначала сравниваем по приоритету
@@ -172,6 +167,7 @@ func (l *Ledger) GetSortedQueue(node *Node) []string {
 	for i, item := range activeItems {
 		result[i] = item.LotID
 	}
+	l.mu.RUnlock()
 	return result
 }
 func (l *Ledger) GetSortedActivePeers(node *Node) []peer.ID {
@@ -186,23 +182,18 @@ func (l *Ledger) GetSortedActivePeers(node *Node) []peer.ID {
 		}
 	}
 
-	// сортировка обязательна для детерминизма!
-	sort.Slice(active, func(i, j int) bool {
-		return active[i].String() < active[j].String()
-	})
-
 	return active
 }
 func (l *Ledger) StartJanitor(ctx context.Context, node *Node) {
-	// будем проверять список раз в 5 минут
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
+	
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			l.mu.Lock() // запираем на время уборки
+			l.mu.Lock()
 			
 			now := time.Now()
 
