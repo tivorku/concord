@@ -58,7 +58,7 @@ type NodeMessage struct {
 	T      int64  `json:"t"` // тики
 	R      int64    `json:"r"` // ракеты
 	JoinedAt int64 `json:"joined_at"`
-	LastEpoch int64 `json:"last_epoch_id"`
+	LastEpoch int64 `json:"last_epoch"`
 	LastTopTick int64 `json:"last_top_tick"`
 	IsBot  bool   `json:"is_bot"`
 }
@@ -196,8 +196,10 @@ func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, 
             fmt.Printf("[Debug] Соседей в топике %s: %d\n", topicName, len(topic.ListPeers()))
             msg, err := sub.Next(ctx)
             if err != nil { return }
+            
             senderPID := msg.ReceivedFrom
             if senderPID == h.ID() { continue }
+            
             var pm pb.NodeMessage
             if err := proto.Unmarshal(msg.Data, &pm); err != nil { continue }
             if !verifyMessage(&pm) { continue }
@@ -219,31 +221,31 @@ func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, 
     }()
     return topic, nil
 }
-// Кэш — чтобы не проверять лицензию каждый раз
+// кэш — чтобы не проверять лицензию каждый раз
 var verifiedPeers sync.Map
 
 func verifyMessage(pm *pb.NodeMessage) bool {
     peerID, err := peer.Decode(pm.PeerId)
     if err != nil { return false }
 
-    // 1. Извлекаем и обнуляем подпись
+    // извлекаем и обнуляем подпись
     sig := pm.MsgSig
     pm.MsgSig = nil
     payload, _ := proto.Marshal(pm)
     pm.MsgSig = sig // возвращаем обратно
 
-    // 2. Проверяем подпись сообщения (владеет ли он этим PeerID)
+    // рроверяем подпись сообщения (владеет ли он этим PeerID)
     pubKey, err := peerID.ExtractPublicKey()
     if err != nil { return false }
     ok, err := pubKey.Verify(payload, sig)
     if !ok || err != nil { return false }
 
-    // 3. Лицензию проверяем только один раз
+    // лицензию проверяем только один раз
     if _, cached := verifiedPeers.Load(peerID); cached {
         return true
     }
 
-    // 4. Первое сообщение — полная проверка лицензии
+    // первое сообщение — полная проверка лицензии
     if !VerifyLicense(pm.License, peerID) {
         return false
     }
@@ -258,7 +260,7 @@ func VerifyLicense(fileData []byte, p peer.ID) bool {
     sig     := fileData[:64]
     rawJSON := fileData[64:]
 
-    // Подпись корневым ключом
+    // проверка корневым ключом
     if !ed25519.Verify(PubKey(), rawJSON, sig) { return false }
 
     var payload struct {
@@ -267,7 +269,7 @@ func VerifyLicense(fileData []byte, p peer.ID) bool {
     }
     if json.Unmarshal(rawJSON, &payload) != nil { return false }
 
-    // Привязка к PeerID + не истекла
+    // привязка к PeerID + не истекла ли
     return payload.ID == p.String() && payload.Exp > time.Now().Unix()
 }
 

@@ -538,6 +538,7 @@ func (lc *LogicCore) announceLoop(ctx context.Context, node *Node) {
 				me.R /= 2
 				me.LastEpoch = currentEpoch
 			}
+			me.LastSeen = time.Now()
 			msg := &pb.NodeMessage{
 				Type:        "ANNOUNCE",
 				LotId:       lc.myLotID,

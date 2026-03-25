@@ -5,11 +5,10 @@ import (
 	"time"
 	"sort"
     "context"
+    "fmt"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
-/*var (
-    PriorityVar float64
-)*/
+
 // Participant — это запись об одном конкретном лоте в сети.
 // это то, что наша нода будет помнить о каждом участнике сети.
 type Participant struct {
@@ -31,8 +30,6 @@ type Ledger struct {
 	Members map[string]*Participant // карта всех лотов: ключ — это LotID
 }
 
-// NewLedger создает и инициализирует чистую память.
-// вызывается один раз при старте программы.
 func NewLedger() *Ledger {
 	return &Ledger{
 		Members: make(map[string]*Participant),
@@ -42,7 +39,9 @@ func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR in
 	l.mu.Lock()
 	defer l.mu.Unlock()
     diff := incomingEpoch - GetCurrentEpoch()
+    // разрешены сообщения только либо от следующей эпохи, либо от предыдущей
     if diff < -1 || diff > 1 {
+        fmt.Println("Слишком большая разница эпох.")
         return false
     }
 	p, exists := l.Members[lotID]
@@ -58,36 +57,37 @@ func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR in
 			LastSeen: time.Now(),
 			LastEpoch: incomingEpoch,
 		}
+		fmt.Println("Записаны данные нового участника")
 		return false
 	}
 	if incomingEpoch < p.LastEpoch {
+	    fmt.Println("Отклоняю сообщение из прошлой эпохи.")
         return false 
     }
     if p.LastEpoch == incomingEpoch {
         if incomingT < p.T || incomingR < p.R {
+            fmt.Println("Шлю коррекционный пакет на сообщение из этой эпохи с уменьшенными параметрами.")
             return true 
         }
 	} else if incomingEpoch > p.LastEpoch {
 	    wasOnline := time.Since(p.LastSeen) < 20*time.Second
         if wasOnline {
             if incomingT < (p.T / 2) || incomingR < (p.R / 2) {
+                fmt.Println("Шлю коррекционный пакет. Новые значения меньше, чем должны быть после слайдинга.")
                 return true
             }
         } else {
             if incomingT < p.T || incomingR < p.R {
+                fmt.Println("Шлю коррекционный пакет. Этой ноды не было онлайн, так что ей нельзя слайдиться.")
                 return true
             }
         }
 	}
+	fmt.Println("Сообщение валидно!")
 	if joinedAt > p.JoinedAt { p.JoinedAt = joinedAt }
     if lastTopTick > p.LastTopTick { p.LastTopTick = lastTopTick }
-    
-    if incomingT > p.T {
-        p.T = incomingT   
-    }
-    if incomingR > p.R {
-        p.R = incomingR
-    }
+    p.T = incomingT
+    p.R = incomingR
     p.LastEpoch = incomingEpoch
 	p.LastSeen = time.Now()
 	return false
@@ -101,7 +101,7 @@ type Item struct {
 }
 func GetCurrentEpoch() int64 {
     networkUnix := time.Now().Unix() + NetworkTimeOffset
-    return networkUnix / 900
+    return networkUnix / 300
 }
 func (l *Ledger) GetSortedQueue(node *Node) []string {
 	l.mu.RLock()
@@ -126,7 +126,7 @@ func (l *Ledger) GetSortedQueue(node *Node) []string {
     
     	// рассчитываем satiety
     	// T — обычные циклы, R — ракеты
-    	satiety := (float64(p.T) * 0.1) + (float64(p.R) * 0.5)
+    	satiety := (float64(p.T)) + (float64(p.R) * 5) 
     
     	// итоговая формула
     	// P = S² / W
@@ -134,7 +134,7 @@ func (l *Ledger) GetSortedQueue(node *Node) []string {
     	if satiety == 0 {
             satiety = 1
         }
-        p.PriorityVar = (satiety * satiety) / (float64(p.WaitTime))
+        p.PriorityVar = (satiety * satiety * 0.05) / (float64(p.WaitTime) + 20.0)
 		// проверка на карантин (20 минут)
 		/*now := time.Now().Unix()
 		if now-p.JoinedAt < 1200 {
