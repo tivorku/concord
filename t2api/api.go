@@ -4,22 +4,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
-	"io"
-	
 )
+
 type LotInfo struct {
 	ID    string
 	IsBot bool
 }
 
-type T2ErrorResponse struct {
-	Meta struct {
-		Status  string `json:"status"`
-		Message string `json:"message"`
-	} `json:"meta"`
-}
 type T2LotsResponse struct {
 	Data []struct {
 		ID     string `json:"id"`
@@ -38,6 +32,7 @@ type T2LotsResponse struct {
 		CreationDate string `json:"creationDate"`
 	} `json:"data"`
 }
+
 func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
 	url := fmt.Sprintf("https://%s/api/subscribers/7%s/exchange/lots/created", T2Host, number)
 	req, _ := http.NewRequest("GET", url, nil)
@@ -58,7 +53,7 @@ func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
 
 	var res T2LotsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return "", 0, 0, fmt.Errorf("ошибка парсинга JSON: %v", err)
+		return "", 0, 0, fmt.Errorf("Ошибка парсинга JSON: %v", err)
 	}
 
 	fmt.Printf("[DEBUG] Всего лотов получено: %d\n", len(res.Data))
@@ -83,7 +78,7 @@ func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
 			t, _ = time.Parse("2006-01-02T15:04:05Z", lot.CreationDate)
 		}
 
-		if !t.IsZero() && time.Since(t).Hours() > 30*24 {
+		if time.Since(t).Hours() > 30*24 {
 			continue
 		}
 
@@ -95,7 +90,7 @@ func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
 
 		v := int(lot.Volume.Value)
 		c := int(lot.Cost.Amount)
-		
+
 		fmt.Printf("%d. %-10s | %d %s | %d руб\n", count, name, v, lot.Volume.UOM, c)
 		selectable = append(selectable, activeLot{lot.ID, v, c})
 	}
@@ -106,13 +101,13 @@ func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
 
 	fmt.Print("\nВыберите номер лота: ")
 	var choice int
-	_, err = fmt.Scanf("%d\n", &choice) 
+	_, err = fmt.Scanf("%d\n", &choice)
 	if err != nil {
-		return "", 0, 0, fmt.Errorf("ошибка ввода: %v", err)
+		return "", 0, 0, fmt.Errorf("Ошибка ввода: %v", err)
 	}
 
 	if choice < 1 || choice > len(selectable) {
-		return "", 0, 0, fmt.Errorf("неверный номер")
+		return "", 0, 0, fmt.Errorf("Неверный номер.")
 	}
 
 	target := selectable[choice-1]
@@ -122,7 +117,7 @@ func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
 
 func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
 	url := fmt.Sprintf("https://%s/api/exchange/lots?trafficType=data&volume=%d&cost=%d&limit=4", T2Host, volume, cost)
-	
+
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -135,13 +130,13 @@ func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
 
 	resp, err := SharedClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("ошибка запроса: %v", err)
+		return nil, fmt.Errorf("Ошибка запроса: %v", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("ошибка чтения тела: %v", err)
+		return nil, fmt.Errorf("Ошибка чтения тела: %v", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -149,7 +144,7 @@ func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
 		if len(snippet) > 200 {
 			snippet = snippet[:200]
 		}
-		return nil, fmt.Errorf("сервер вернул %d. Тело: %s", resp.StatusCode, snippet)
+		return nil, fmt.Errorf("Сервер вернул %d. Тело: %s", resp.StatusCode, snippet)
 	}
 
 	var res struct {
@@ -160,11 +155,11 @@ func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
 	}
 
 	if err := json.Unmarshal(body, &res); err != nil {
-		return nil, fmt.Errorf("ошибка декодирования JSON: %v. Тело: %s", err, string(body[:50]))
+		return nil, fmt.Errorf("Ошибка декодирования JSON: %v. Тело: %s", err, string(body[:50]))
 	}
 
 	if len(res.Data) == 0 {
-		return nil, fmt.Errorf("лоты не найдены")
+		return nil, fmt.Errorf("Лоты не найдены.")
 	}
 
 	var results []LotInfo
@@ -183,7 +178,7 @@ func Rocket(client *http.Client, bearer, number, lotID string) error {
 	req.Header.Set("Tele2-User-Agent", AppVersion)
 	req.Header.Set("User-Agent", OkHttpVersion)
 	req.Header.Set("X-API-Version", "2")
-    
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -193,5 +188,5 @@ func Rocket(client *http.Client, bearer, number, lotID string) error {
 	if resp.StatusCode == http.StatusOK {
 		return nil
 	}
-	return fmt.Errorf("ошибка Т2: %v", resp.Status)
+	return fmt.Errorf("Ошибка Т2: %v", resp.Status)
 }

@@ -3,17 +3,17 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/http"
-	"os"
-    "time"
-    "sync"
+	"github.com/libp2p/go-libp2p/core/control"
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
-	"github.com/libp2p/go-libp2p/core/control"
-	"github.com/libp2p/go-libp2p/core/host"
+	"net"
+	"net/http"
+	"os"
+	"sync"
+	"time"
 )
 
 // WhitelistManager хранит разрешенные IP и PeerID
@@ -84,8 +84,8 @@ func (g *RelayGater) InterceptSecured(dir network.Direction, p peer.ID, addrs ne
 }
 
 // остальные методы просто разрешаем (Dial всегда true, чтобы реле могло искать бутстрапы)
-func (g *RelayGater) InterceptPeerDial(p peer.ID) bool { return true }
-func (g *RelayGater) InterceptAddrDial(peer.ID, multiaddr.Multiaddr) bool { return true }
+func (g *RelayGater) InterceptPeerDial(p peer.ID) bool                                { return true }
+func (g *RelayGater) InterceptAddrDial(peer.ID, multiaddr.Multiaddr) bool             { return true }
 func (g *RelayGater) InterceptUpgraded(network.Conn) (bool, control.DisconnectReason) { return true, 0 }
 
 func RunAuthServer(w *WhitelistManager, port string, password string, h host.Host) {
@@ -106,7 +106,7 @@ func RunAuthServer(w *WhitelistManager, port string, password string, h host.Hos
 
 		// получаем реальный IP клиента
 		host, _, _ := net.SplitHostPort(r.RemoteAddr)
-		
+
 		w.Add(pid, host)
 		h.ConnManager().Protect(pid, "auth-client")
 		fmt.Printf("[SHIELD] %s (IP: %s) successfully authorized\n", pid, host)

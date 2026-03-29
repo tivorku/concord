@@ -1,28 +1,34 @@
 package t2api
+
 import (
-    "net/http"
-    "encoding/json"
-    "fmt"
-    "os"
-    "strings"
-    "bytes"
-    "io"
-    "net/url"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
 )
+
 type Data struct {
 	Access  string `json:"access_token"`
 	Refresh string `json:"refresh_token"`
 }
+
 var (
-    
 	number, sms_code string
-	data Data
-	bearer_url = fmt.Sprintf("https://sso.t2.ru/auth/realms/tele2-b2c/protocol/openid-connect/token")
+	data             Data
+	bearer_url       = fmt.Sprintf("https://sso.t2.ru/auth/realms/tele2-b2c/protocol/openid-connect/token")
 )
+
 func RequestSms(number string) string {
 	sms_url := fmt.Sprintf("https://%s/api/validation/number/7%s", T2Host, number)
 	payload := map[string]string{"sender": "Tele2"}
-	jsondata, _ := json.Marshal(payload)
+	jsondata, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Println(err)
+	}
 	request, err := http.NewRequest("POST", sms_url, bytes.NewBuffer(jsondata))
 	if err != nil {
 		fmt.Println(err)
@@ -31,7 +37,6 @@ func RequestSms(number string) string {
 	request.Header.Set("User-Agent", OkHttpVersion)
 	request.Header.Set("Content-Type", "application/json; charset=UTF-8")
 	request.Header.Set("X-API-Version", "1")
-	request.Header.Set("Content-Length", "18")
 	response, err := SharedClient.Do(request)
 	if err != nil {
 		fmt.Println(err)
@@ -87,7 +92,7 @@ func GetTokens(refresh string) (string, string, error) {
 		return "", "", err
 	}
 	if response.StatusCode != http.StatusOK {
-	    fmt.Println(response.Status)
+		fmt.Println(response.Status)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {

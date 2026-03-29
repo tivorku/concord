@@ -1,22 +1,22 @@
 package t2api
 
 import (
-        "os"
-        "fmt"
+	"fmt"
+	"os"
 )
 
 func Login() (string, string) {
-    var access string
-    Check()
-    
+	var access string
+	Check()
+
 	// сначала проверяем входили ли мы ранее
 	numBytes, _ := os.ReadFile("number.txt")
-    number := string(numBytes)
+	number := string(numBytes)
 	if number != "" {
 		TryAnotherNumber()
 	}
-    
-    // запрашиваем у пользователя номер при его отсутствии
+
+	// запрашиваем у пользователя номер при его отсутствии
 	numBytes, _ = os.ReadFile("number.txt")
 	number = string(numBytes)
 	if number == "" {
@@ -33,8 +33,8 @@ func Login() (string, string) {
 			os.Exit(1)
 		}
 	}
-	
-    // если refresh-токен отсутствует, то запрашиваем смс, сохраняем refresh-токен в файл и access-токен в переменную
+
+	// если refresh-токен отсутствует, то запрашиваем смс, сохраняем refresh-токен в файл и access-токен в переменную
 	refBytes, _ = os.ReadFile("refresh.txt")
 	refresh = string(refBytes)
 	if refresh == "" {
@@ -46,7 +46,7 @@ func Login() (string, string) {
 }
 
 func TryAnotherNumber() {
-    var ResetNumber string
+	var ResetNumber string
 	fmt.Print("Ввести другой номер телефона? (y/N): ")
 	fmt.Scanln(&ResetNumber)
 	if yes_reset[ResetNumber] {
@@ -58,7 +58,7 @@ func TryAnotherNumber() {
 	return
 }
 func GetNumber() string {
-    var RememberNumber string
+	var RememberNumber string
 	os.Remove("refresh.txt") // чтобы обеспечить обновление refresh-токена для нового номера в любом случае
 	fmt.Print("Введите номер телефона: +7")
 	fmt.Scanln(&number)
