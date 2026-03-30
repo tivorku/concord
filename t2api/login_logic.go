@@ -1,75 +1,112 @@
 package t2api
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 )
+
+type Config struct {
+	Number  string `json:"number"`
+	Refresh string `json:"refresh"`
+}
+
+const configFile = "creds.json"
+
+func loadConfig() Config {
+	var cfg Config
+	data, err := os.ReadFile(configFile)
+	if err == nil {
+		json.Unmarshal(data, &cfg)
+	}
+	return cfg
+}
+
+// saveConfig сохраняет данные структуры в JSON-файл
+func saveConfig(cfg Config) {
+	data, _ := json.MarshalIndent(cfg, "", "  ")
+	os.WriteFile(configFile, data, 0644)
+}
 
 func Login() (string, string) {
 	var access string
 	Check()
 
-	// сначала проверяем входили ли мы ранее
-	numBytes, _ := os.ReadFile("number.txt")
-	number := string(numBytes)
-	if number != "" {
-		TryAnotherNumber()
+	cfg := loadConfig()
+
+	if cfg.Number != "" {
+		TryAnotherNumber(&cfg)
 	}
 
-	// запрашиваем у пользователя номер при его отсутствии
-	numBytes, _ = os.ReadFile("number.txt")
-	number = string(numBytes)
-	if number == "" {
-		number = GetNumber()
+	if cfg.Number == "" {
+		cfg.Number = GetNumber(&cfg)
 	}
 
 	var err error
-	// запрашиваем у сервера новый access-токен, если есть refresh-токен
-	refBytes, _ := os.ReadFile("refresh.txt")
-	refresh := string(refBytes)
-	if refresh != "" {
-		_, access, err = GetTokens(refresh)
+	if cfg.Refresh != "" {
+		var newRefresh string
+		newRefresh, access, err = GetTokens(cfg.Refresh)
 		if err != nil {
-			os.Exit(1)
+			os.Exit(5)
+		}
+
+		if newRefresh != "" && newRefresh != cfg.Refresh {
+			cfg.Refresh = newRefresh
+			saveConfig(cfg)
 		}
 	}
 
-	// если refresh-токен отсутствует, то запрашиваем смс, сохраняем refresh-токен в файл и access-токен в переменную
-	refBytes, _ = os.ReadFile("refresh.txt")
-	refresh = string(refBytes)
-	if refresh == "" {
-		sms_code := RequestSms(number)
-		_, access = RequestBearer(number, sms_code)
+	if cfg.Refresh == "" {
+		smsCode := RequestSms(cfg.Number)
+
+		newRefresh, acc := RequestBearer(cfg.Number, smsCode)
+		access = acc
+		cfg.Refresh = newRefresh
+		saveConfig(cfg)
 	}
+
 	bearer := "Bearer " + access
-	return bearer, number
+	return bearer, cfg.Number
 }
 
-func TryAnotherNumber() {
-	var ResetNumber string
+func TryAnotherNumber(cfg *Config) {
+	var resetNumber string
 	fmt.Print("Ввести другой номер телефона? (y/N): ")
-	fmt.Scanln(&ResetNumber)
-	if yes_reset[ResetNumber] {
-		os.Remove("refresh.txt")
-		os.Remove("number.txt")
-		os.OpenFile("number.txt", os.O_CREATE, 0644)
-		os.OpenFile("refresh.txt", os.O_CREATE, 0644)
+	fmt.Scanln(&resetNumber)
+	
+	if yes_reset[resetNumber] {
+		cfg.Number = ""
+		cfg.Refresh = ""
+		saveConfig(*cfg)
 	}
-	return
 }
-func GetNumber() string {
-	var RememberNumber string
-	os.Remove("refresh.txt") // чтобы обеспечить обновление refresh-токена для нового номера в любом случае
-	fmt.Print("Введите номер телефона: +7")
-	fmt.Scanln(&number)
+
+func GetNumber(cfg *Config) string {
+	var rememberNumber string
+	var number string
+
+	cfg.Refresh = ""
+	saveConfig(*cfg)
+    for number == "" || len(number) != 10 {
+    	fmt.Print("Введите номер телефона: +7")
+    	fmt.Scanln(&number)
+    	if number == "" || len(number) != 10 {
+    	    fmt.Println("Неверно введен номер телефона!")
+    	}
+	}
 	fmt.Print("Запомнить номер телефона? (Y/n): ")
-	fmt.Scanln(&RememberNumber)
-	if yes[RememberNumber] {
-		os.WriteFile("number.txt", []byte(number), 0644)
+	fmt.Scanln(&rememberNumber)
+
+	if yes[rememberNumber] {
+		cfg.Number = number
+		saveConfig(*cfg)
 	}
 	return number
 }
+
 func Check() {
-	os.OpenFile("refresh.txt", os.O_CREATE, 0644)
-	os.OpenFile("number.txt", os.O_CREATE, 0644)
+	if _, err := os.Stat(configFile); os.IsNotExist(err) {
+		emptyConfig := Config{Number: "", Refresh: ""}
+		saveConfig(emptyConfig)
+	}
 }

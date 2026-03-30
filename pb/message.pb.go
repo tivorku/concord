@@ -32,8 +32,7 @@ type NodeMessage struct {
 	LastEpoch     int64                  `protobuf:"varint,7,opt,name=last_epoch,json=lastEpoch,proto3" json:"last_epoch,omitempty"`
 	LastTopTick   int64                  `protobuf:"varint,8,opt,name=last_top_tick,json=lastTopTick,proto3" json:"last_top_tick,omitempty"`
 	IsBot         bool                   `protobuf:"varint,9,opt,name=is_bot,json=isBot,proto3" json:"is_bot,omitempty"`
-	License       []byte                 `protobuf:"bytes,10,opt,name=license,proto3" json:"license,omitempty"`
-	MsgSig        []byte                 `protobuf:"bytes,11,opt,name=msg_sig,json=msgSig,proto3" json:"msg_sig,omitempty"`
+	Signature     []byte                 `protobuf:"bytes,10,opt,name=signature,proto3" json:"signature,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -131,16 +130,9 @@ func (x *NodeMessage) GetIsBot() bool {
 	return false
 }
 
-func (x *NodeMessage) GetLicense() []byte {
+func (x *NodeMessage) GetSignature() []byte {
 	if x != nil {
-		return x.License
-	}
-	return nil
-}
-
-func (x *NodeMessage) GetMsgSig() []byte {
-	if x != nil {
-		return x.MsgSig
+		return x.Signature
 	}
 	return nil
 }
@@ -149,7 +141,7 @@ var File_message_proto protoreflect.FileDescriptor
 
 const file_message_proto_rawDesc = "" +
 	"\n" +
-	"\rmessage.proto\x12\amessage\"\x97\x02\n" +
+	"\rmessage.proto\x12\amessage\"\x82\x02\n" +
 	"\vNodeMessage\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x15\n" +
 	"\x06lot_id\x18\x02 \x01(\tR\x05lotId\x12\x17\n" +
@@ -160,10 +152,9 @@ const file_message_proto_rawDesc = "" +
 	"\n" +
 	"last_epoch\x18\a \x01(\x03R\tlastEpoch\x12\"\n" +
 	"\rlast_top_tick\x18\b \x01(\x03R\vlastTopTick\x12\x15\n" +
-	"\x06is_bot\x18\t \x01(\bR\x05isBot\x12\x18\n" +
-	"\alicense\x18\n" +
-	" \x01(\fR\alicense\x12\x17\n" +
-	"\amsg_sig\x18\v \x01(\fR\x06msgSigB\x06Z\x04./pbb\x06proto3"
+	"\x06is_bot\x18\t \x01(\bR\x05isBot\x12\x1c\n" +
+	"\tsignature\x18\n" +
+	" \x01(\fR\tsignatureB\x06Z\x04./pbb\x06proto3"
 
 var (
 	file_message_proto_rawDescOnce sync.Once

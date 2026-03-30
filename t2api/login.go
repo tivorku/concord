@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 )
 
@@ -72,7 +71,6 @@ func RequestBearer(number, sms_code string) (string, string) {
 	defer response.Body.Close()
 	body, _ := io.ReadAll(response.Body)
 	json.Unmarshal(body, &data)
-	os.WriteFile("refresh.txt", []byte(data.Refresh), 0644)
 	return data.Refresh, data.Access
 }
 func GetTokens(refresh string) (string, string, error) {
@@ -100,6 +98,5 @@ func GetTokens(refresh string) (string, string, error) {
 	}
 	body, _ := io.ReadAll(response.Body)
 	json.Unmarshal(body, &data)
-	os.WriteFile("refresh.txt", []byte(data.Refresh), 0644)
 	return data.Refresh, data.Access, nil
 }

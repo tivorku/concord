@@ -13,6 +13,5 @@ message NodeMessage {
   int64  last_epoch = 7;
   int64  last_top_tick = 8;
   bool   is_bot = 9;
- // bytes  license = 10;
- // bytes  msg_sig = 11;
+  bytes  signature = 10;
 }

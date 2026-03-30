@@ -3,17 +3,18 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
+	"os"
+	"sync"
+	"time"
+
 	"github.com/libp2p/go-libp2p/core/control"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
-	"net"
-	"net/http"
-	"os"
-	"sync"
-	"time"
 )
 
 // WhitelistManager хранит разрешенные IP и PeerID
@@ -90,26 +91,37 @@ func (g *RelayGater) InterceptUpgraded(network.Conn) (bool, control.DisconnectRe
 
 func RunAuthServer(w *WhitelistManager, port string, password string, h host.Host) {
 	http.HandleFunc("/register", func(rw http.ResponseWriter, r *http.Request) {
-		idStr := r.URL.Query().Get("id")
-		pass := r.URL.Query().Get("pass")
+		if r.Method != http.MethodPost {
+			http.Error(rw, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 
-		if pass != password {
+		var body struct {
+			ID   string `json:"id"`
+			Pass string `json:"pass"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(rw, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		if body.Pass != password {
 			http.Error(rw, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		pid, err := peer.Decode(idStr)
+		pid, err := peer.Decode(body.ID)
 		if err != nil {
 			http.Error(rw, "Invalid PeerID", http.StatusBadRequest)
 			return
 		}
 
-		// получаем реальный IP клиента
-		host, _, _ := net.SplitHostPort(r.RemoteAddr)
+		remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 
-		w.Add(pid, host)
+		w.Add(pid, remoteIP)
 		h.ConnManager().Protect(pid, "auth-client")
-		fmt.Printf("[SHIELD] %s (IP: %s) successfully authorized\n", pid, host)
+		fmt.Printf("[SHIELD] %s (IP: %s) successfully authorized\n", pid, remoteIP)
 		serverTime := time.Now().Unix()
 		fmt.Fprintf(rw, "OK:%d", serverTime)
 	})

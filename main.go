@@ -14,24 +14,45 @@ import (
 
 func main() {
 	hideAndroidRestrictedNetworkError()
+
+	if err := t2api.FetchCertificateFingerprint(); err != nil {
+		fmt.Printf("[SECURITY] Failed to fetch T2 certificate: %v\n", err)
+		os.Exit(1)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	myLedger := p2p.NewLedger()
 
 	bearer, number := t2api.Login()
-	/*myLotID, volume, value, err := t2api.ShowAndSelectLot(bearer, number)
+	/*myLotIDs, volume, value, err := t2api.SelectLots(bearer, number)
 	if err != nil {
-	    fmt.Println(err)
-	    os.Exit(1)
+		fmt.Println(err)
+		os.Exit(1)
 	}*/
 
 	// MOCKING myLotID FOR TESTING
-	LotBytes, _ := os.ReadFile("lotid.txt")
-	myLotID := string(LotBytes)
+	LotBytes, err := os.ReadFile("lotid.txt")
+	if err != nil {
+		fmt.Printf("Failed to read lotid.txt: %v\n", err)
+		os.Exit(1)
+	}
+	lines := strings.Split(strings.TrimSpace(string(LotBytes)), "\n")
+	var myLotIDs []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			myLotIDs = append(myLotIDs, line)
+		}
+	}
+	if len(myLotIDs) == 0 {
+		fmt.Println("No lot IDs found in lotid.txt")
+		os.Exit(1)
+	}
 	var (
-		volume int = 1
-		value  int = 15
+		volume int = 43
+		value  int = 645
 	)
 
 	privKey, _ := p2p.GetPrivateKey("identity.key")
@@ -39,7 +60,7 @@ func main() {
 	h, err := p2p.InitHost(ctx, privKey)
 	if err != nil {
 		fmt.Println(err)
-		os.Exit(1)
+		os.Exit(2)
 	}
 
 	node := &p2p.Node{Host: h, Ledger: myLedger, Ctx: ctx}
@@ -49,12 +70,17 @@ func main() {
 	p2p.StartDiscovery(ctx, h, rendezvous)
 	go func() {
 		time.Sleep(200 * time.Millisecond)
-		now := time.Now().Unix() + p2p.NetworkTimeOffset
-		// lotID string, pID peer.ID, incomingT int64, incomingR int64, joinedAt int64, lastTopTick int64, incomingEpoch int64
-		myLedger.Update(myLotID, h.ID(), 0, 0, now, 0, p2p.GetCurrentEpoch())
+		for i, lotID := range myLotIDs {
+			if i > 0 {
+				time.Sleep(10 * time.Second)
+			}
+			now := time.Now().Unix() + p2p.NetworkTimeOffset
+			myLedger.Update(lotID, h.ID(), p2p.PrivKeyToPubKey(privKey), 0, 0, now, 0, p2p.GetCurrentEpoch())
+			fmt.Printf("[MDN] Лот %d/%d зарегистрирован в %d\n", i+1, len(myLotIDs), now)
+		}
 	}()
 	go myLedger.StartJanitor(ctx, node)
-	core := p2p.InitLogicCore(myLedger, myLotID, volume, value, privKey, bearer, number, node)
+	core := p2p.InitLogicCore(myLedger, myLotIDs, volume, value, privKey, bearer, number, node)
 	node.RegisterProxyHandler()
 	node.Topic, _ = p2p.StartPubSub(ctx, h, rendezvous, myLedger, core)
 
@@ -68,7 +94,7 @@ func main() {
 				return
 			default:
 				core.ShowDashboard(node, rendezvous)
-				time.Sleep(2 * time.Second)
+				time.Sleep(5 * time.Second)
 			}
 		}
 	}()

@@ -1,19 +1,24 @@
 package t2api
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
-	utls "github.com/refraction-networking/utls"
+	"encoding/hex"
+	"fmt"
 	"net"
 	"net/http"
 	"time"
+
+	utls "github.com/refraction-networking/utls"
 )
 
 var (
-	yes_reset    = map[string]bool{"yes": true, "ye": true, "y": true}
-	no           = map[string]bool{"no": true, "n": true}
-	no_reset     = map[string]bool{"": true, "no": true, "n": true}
-	yes          = map[string]bool{"": true, "yes": true, "ye": true, "y": true}
-	SharedClient *http.Client
+	yes_reset       = map[string]bool{"yes": true, "ye": true, "y": true}
+	no              = map[string]bool{"no": true, "n": true}
+	no_reset        = map[string]bool{"": true, "no": true, "n": true}
+	yes             = map[string]bool{"": true, "yes": true, "ye": true, "y": true}
+	SharedClient    *http.Client
+	certFingerprint string
 )
 
 const (
@@ -23,26 +28,52 @@ const (
 	T2FullHost    = "yar.t2.ru:443"
 )
 
+func FetchCertificateFingerprint() error {
+	conn, err := tls.Dial("tcp", T2FullHost, nil)
+	if err != nil {
+		return fmt.Errorf("failed to connect to T2: %w", err)
+	}
+	defer conn.Close()
+
+	certs := conn.ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return fmt.Errorf("no certificates received from T2")
+	}
+
+	fp := sha256.Sum256(certs[0].Raw)
+	certFingerprint = hex.EncodeToString(fp[:8])
+	return nil
+}
+
 func init() {
-	// создаем кастомный DialTLS для имитации реального устройства
 	dialTLS := func(network, addr string) (net.Conn, error) {
 		conn, err := net.DialTimeout(network, addr, 10*time.Second)
 		if err != nil {
 			return nil, err
 		}
 
-		// создаем UClient, который мимикрирует под android
 		config := &utls.Config{
 			ServerName: T2Host,
 			NextProtos: []string{"http/1.1"},
 		}
 
-		uConn := utls.UClient(conn, config, utls.HelloAndroid_11_OkHttp) // мимикрируем под Android 11
+		uConn := utls.UClient(conn, config, utls.HelloAndroid_11_OkHttp)
 
 		if err := uConn.Handshake(); err != nil {
 			uConn.Close()
 			return nil, err
 		}
+
+		if certFingerprint != "" {
+			cert := uConn.ConnectionState().PeerCertificates[0]
+			fp := sha256.Sum256(cert.Raw)
+			fingerprint := hex.EncodeToString(fp[:8])
+			if fingerprint != certFingerprint {
+				uConn.Close()
+				return nil, fmt.Errorf("certificate mismatch: possible MITM attack")
+			}
+		}
+
 		return uConn, nil
 	}
 
@@ -52,7 +83,7 @@ func init() {
 			DialTLS:            dialTLS,
 			MaxIdleConns:       10,
 			IdleConnTimeout:    90 * time.Second,
-			TLSNextProto:       make(map[string]func(authority string, c *tls.Conn) http.RoundTripper), // принудительно отключаем HTTP/2, так как в Go он палится на отпечатках
+			TLSNextProto:       make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
 			DisableCompression: false,
 		},
 	}

@@ -3,63 +3,97 @@ package p2p
 import (
 	"context"
 	"fmt"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"sort"
 	"sync"
 	"time"
+
+	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"sort"
 )
 
-// Participant — это запись об одном конкретном лоте в сети.
-// это то, что наша нода будет помнить о каждом участнике сети.
 type Participant struct {
 	LotID       string
 	PeerID      peer.ID
+	PubKey      crypto.PubKey
 	T           int64
 	R           int64
-	PriorityVar float64
-	WaitTime    int64
 	LastTopTick int64
 	LastEpoch   int64
 	JoinedAt    int64
 	LastSeen    time.Time
 }
 
-// Ledger — это общая память сети.
-// каждая нода хранит свою копию этой структуры.
 type Ledger struct {
 	mu      sync.RWMutex
-	Members map[string]*Participant // карта всех лотов: ключ — это LotID
+	Members map[string][]*Participant // ключ = PeerID.String()
 }
 
 func NewLedger() *Ledger {
 	return &Ledger{
-		Members: make(map[string]*Participant),
+		Members: make(map[string][]*Participant),
 	}
 }
-func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR int64, joinedAt int64, lastTopTick int64, incomingEpoch int64) bool {
+
+func (p *Participant) TrustScore() float64 {
+	intervals := float64(time.Now().Unix()-p.JoinedAt) / (20 * 60.0)
+	if intervals < 0 {
+		return 0
+	}
+	return intervals
+}
+
+func (l *Ledger) IsLotKnown(lotID string) bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	for _, participants := range l.Members {
+		for _, p := range participants {
+			if p.LotID == lotID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (l *Ledger) Update(lotID string, pID peer.ID, pubKey crypto.PubKey, incomingT int64, incomingR int64, joinedAt int64, lastTopTick int64, incomingEpoch int64) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
 	diff := incomingEpoch - GetCurrentEpoch()
-	// разрешены сообщения только либо от следующей эпохи, либо от предыдущей
 	if diff < -1 || diff > 1 {
 		fmt.Println("Слишком большая разница эпох.")
 		return false
 	}
-	p, exists := l.Members[lotID]
 
-	if !exists {
-		l.Members[lotID] = &Participant{
+	peerKey := pID.String()
+	participants := l.Members[peerKey]
+
+	// Ищем существующий лот от этого пира
+	var p *Participant
+	for _, part := range participants {
+		if part.LotID == lotID {
+			p = part
+			break
+		}
+	}
+
+	if p == nil {
+		// Новый лот
+		l.Members[peerKey] = append(participants, &Participant{
 			LotID:       lotID,
 			PeerID:      pID,
+			PubKey:      pubKey,
 			T:           incomingT,
 			R:           incomingR,
 			LastTopTick: lastTopTick,
 			JoinedAt:    joinedAt,
 			LastSeen:    time.Now(),
 			LastEpoch:   incomingEpoch,
-		}
+		})
 		return false
 	}
+
+	// Существующий лот — проверки
 	if incomingEpoch < p.LastEpoch {
 		fmt.Println("Отклоняю сообщение из прошлой эпохи.")
 		return false
@@ -83,112 +117,146 @@ func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, incomingR in
 			}
 		}
 	}
-	fmt.Println("Сообщение валидно!")
 	if joinedAt > p.JoinedAt {
 		p.JoinedAt = joinedAt
 	}
 	if lastTopTick > p.LastTopTick {
 		p.LastTopTick = lastTopTick
 	}
-	p.T = incomingT
-	p.R = incomingR
+
+	if incomingT > p.T {
+		diff := incomingT - p.T
+		if diff > 3 {
+			diff = 3
+		}
+		p.T = p.T + diff
+	} else {
+		p.T = incomingT
+	}
+
+	if incomingR > p.R {
+		diff := incomingR - p.R
+		if diff > 1 {
+			diff = 1
+		}
+		p.R = p.R + diff
+	} else {
+		p.R = incomingR
+	}
+
 	p.LastEpoch = incomingEpoch
 	p.LastSeen = time.Now()
 	return false
 }
 
-// Item — вспомогательная структура для сортировки
 type Item struct {
 	LotID    string
 	Priority float64
 	PeerID   string
 	JoinedAt int64
+	WaitTime int64
+	T        int64
+	R        int64
+	Trust    float64
 }
 
 func GetCurrentEpoch() int64 {
 	networkUnix := time.Now().Unix() + NetworkTimeOffset
 	return networkUnix / 300
 }
-func (l *Ledger) GetSortedQueue(node *Node) []string {
-	l.mu.RLock()
 
-	var activeItems []Item
+func (l *Ledger) GetQueueWithMetrics(node *Node) []Item {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
-	for id, p := range l.Members {
-		// игнорируем тех, кто молчит дольше 15 секунд (оффлайн), кроме себя
-		if time.Since(p.LastSeen) > 15*time.Second && p.PeerID != node.Host.ID() {
-			continue
+	now := time.Now().Unix() + NetworkTimeOffset
+	var items []Item
+
+	for _, participants := range l.Members {
+		for _, p := range participants {
+			if time.Since(p.LastSeen) > 15*time.Second && p.PeerID != node.Host.ID() {
+				continue
+			}
+
+			waitTime := p.LastTopTick
+			if waitTime == 0 {
+				waitTime = p.JoinedAt
+			}
+			waitTime = now - waitTime
+			if waitTime < 1 {
+				waitTime = 1
+			}
+
+			satiety := float64(p.T) + float64(p.R)*5
+			if satiety == 0 {
+				satiety = 1
+			}
+			priority := (satiety * satiety * 0.05) / (float64(waitTime) + 20.0)
+
+			items = append(items, Item{
+				LotID:    p.LotID,
+				Priority: priority,
+				PeerID:   p.PeerID.String(),
+				JoinedAt: p.JoinedAt,
+				WaitTime: waitTime,
+				T:        p.T,
+				R:        p.R,
+				Trust:    p.TrustScore(),
+			})
 		}
-
-		if p.LastTopTick == 0 {
-			p.WaitTime = time.Now().Unix() + NetworkTimeOffset - p.JoinedAt
-		} else {
-			p.WaitTime = time.Now().Unix() + NetworkTimeOffset - p.LastTopTick
-		}
-		if p.WaitTime < 1 {
-			p.WaitTime = 1 // защита от деления на 0
-		}
-
-		// рассчитываем satiety
-		// T — обычные циклы, R — ракеты
-		satiety := (float64(p.T)) + (float64(p.R) * 5)
-		if satiety == 0 {
-			satiety = 1
-		}
-		
-		// итоговая формула
-		// P = S² / W
-		// победит тот, у кого число будет САМЫМ МАЛЕНЬКИМ
-		p.PriorityVar = (satiety * satiety * 0.05) / (float64(p.WaitTime) + 20.0)
-		// проверка на карантин (20 минут)
-		/*now := time.Now().Unix()
-		if now-p.JoinedAt < 1200 {
-			p.PriorityVar += 1000000.0
-		}*/
-
-		activeItems = append(activeItems, Item{
-			LotID:    id,
-			Priority: p.PriorityVar,
-			PeerID:   p.PeerID.String(),
-			JoinedAt: p.JoinedAt, // понадобится для Tie-break
-		})
 	}
-	// детерминированная сортировка
-	sort.Slice(activeItems, func(i, j int) bool {
-		// сначала сравниваем по приоритету
-		if activeItems[i].Priority != activeItems[j].Priority {
-			return activeItems[i].Priority < activeItems[j].Priority
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Priority != items[j].Priority {
+			return items[i].Priority < items[j].Priority
 		}
-		// если оба "старички" или оба "новички" с равным P — смотрим кто зашел раньше
-		if activeItems[i].JoinedAt != activeItems[j].JoinedAt {
-			return activeItems[i].JoinedAt < activeItems[j].JoinedAt
+		if items[i].JoinedAt != items[j].JoinedAt {
+			return items[i].JoinedAt < items[j].JoinedAt
 		}
-		// если даже время захода совпало — финальный Tie-break по PeerID
-		return activeItems[i].PeerID < activeItems[j].PeerID
+		return items[i].PeerID < items[j].PeerID
 	})
 
-	// собираем только LotID
-	result := make([]string, len(activeItems))
-	for i, item := range activeItems {
+	return items
+}
+
+func (l *Ledger) GetSortedQueue(node *Node) []string {
+	items := l.GetQueueWithMetrics(node)
+	result := make([]string, len(items))
+	for i, item := range items {
 		result[i] = item.LotID
 	}
-	l.mu.RUnlock()
 	return result
 }
+
 func (l *Ledger) GetActivePeers(node *Node) []peer.ID {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
+	seen := make(map[peer.ID]bool)
 	var active []peer.ID
-	for _, p := range l.Members {
-		// считаем живыми тех, кто подавал знак последние 10 секунд и себя
-		if time.Since(p.LastSeen) <= 10*time.Second || p.PeerID == node.Host.ID() {
-			active = append(active, p.PeerID)
+
+	for _, participants := range l.Members {
+		for _, p := range participants {
+			if seen[p.PeerID] {
+				continue
+			}
+			if time.Since(p.LastSeen) <= 10*time.Second || p.PeerID == node.Host.ID() {
+				seen[p.PeerID] = true
+				active = append(active, p.PeerID)
+			}
 		}
 	}
 
 	return active
 }
+
+func (l *Ledger) GetMyLots(node *Node) []*Participant {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	return l.Members[node.Host.ID().String()]
+}
+
 func (l *Ledger) StartJanitor(ctx context.Context, node *Node) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
@@ -202,21 +270,32 @@ func (l *Ledger) StartJanitor(ctx context.Context, node *Node) {
 
 			now := time.Now()
 
-			for id, p := range l.Members {
-				// если мы не слышали о ноде больше 30 минут — она ушла из сети
-				if now.Sub(p.LastSeen) > 30*time.Minute && p.PeerID != node.Host.ID() {
-					delete(l.Members, id)
+			for peerKey, participants := range l.Members {
+				allOffline := true
+				for _, p := range participants {
+					if now.Sub(p.LastSeen) <= 30*time.Minute || p.PeerID == node.Host.ID() {
+						allOffline = false
+						break
+					}
+				}
+				if allOffline && peerKey != node.Host.ID().String() {
+					delete(l.Members, peerKey)
 				}
 			}
 			l.mu.Unlock()
 		}
 	}
 }
-func (l *Ledger) UpdateTicks(lotID string) {
+
+func (l *Ledger) UpdateTicks(lotID string, pID peer.ID) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if p, exists := l.Members[lotID]; exists {
-		p.T++ // прибавляем 1 цикл нахождения в топе
+	participants := l.Members[pID.String()]
+	for _, p := range participants {
+		if p.LotID == lotID {
+			p.T++
+			return
+		}
 	}
 }

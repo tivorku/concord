@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -34,6 +35,14 @@ type T2LotsResponse struct {
 }
 
 func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
+	lotIDs, volume, value, err := SelectLots(bearer, number)
+	if err != nil {
+		return "", 0, 0, err
+	}
+	return lotIDs[0], volume, value, nil
+}
+
+func SelectLots(bearer, number string) ([]string, int, int, error) {
 	url := fmt.Sprintf("https://%s/api/subscribers/7%s/exchange/lots/created", T2Host, number)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Authorization", bearer)
@@ -43,17 +52,17 @@ func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
 
 	resp, err := SharedClient.Do(req)
 	if err != nil {
-		return "", 0, 0, err
+		return nil, 0, 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return "", 0, 0, fmt.Errorf("Т2 вернул ошибку: %d", resp.StatusCode)
+		return nil, 0, 0, fmt.Errorf("Т2 вернул ошибку: %d", resp.StatusCode)
 	}
 
 	var res T2LotsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return "", 0, 0, fmt.Errorf("Ошибка парсинга JSON: %v", err)
+		return nil, 0, 0, fmt.Errorf("Ошибка парсинга JSON: %v", err)
 	}
 
 	fmt.Printf("[DEBUG] Всего лотов получено: %d\n", len(res.Data))
@@ -96,23 +105,48 @@ func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
 	}
 
 	if len(selectable) == 0 {
-		return "", 0, 0, fmt.Errorf("Активные лоты не найдены. Создайте лот на Маркете вручную.")
+		return nil, 0, 0, fmt.Errorf("Активные лоты не найдены. Создайте лот на Маркете вручную.")
 	}
 
-	fmt.Print("\nВыберите номер лота: ")
-	var choice int
-	_, err = fmt.Scanf("%d\n", &choice)
-	if err != nil {
-		return "", 0, 0, fmt.Errorf("Ошибка ввода: %v", err)
+	if len(selectable) > 5 {
+		selectable = selectable[:5]
+		fmt.Printf("[MDN] Ограничено до 5 лотов\n")
 	}
 
-	if choice < 1 || choice > len(selectable) {
-		return "", 0, 0, fmt.Errorf("Неверный номер.")
+	fmt.Print("\nВыберите номера лотов (через пробел, например: 1 2 3): ")
+	var choices string
+	fmt.Scanln(&choices)
+
+	var selected []int
+	for _, c := range strings.Fields(choices) {
+		var num int
+		fmt.Sscanf(c, "%d", &num)
+		selected = append(selected, num)
 	}
 
-	target := selectable[choice-1]
-	fmt.Printf("[MDN] Выбран лот: %s (%d ГБ)\n", target.id, target.vol)
-	return target.id, target.vol, target.amount, nil
+	if len(selected) == 0 {
+		return nil, 0, 0, fmt.Errorf("Не выбран ни один лот.")
+	}
+
+	var lotIDs []string
+	var volume, value int
+
+	for _, choice := range selected {
+		if choice < 1 || choice > len(selectable) {
+			continue
+		}
+		target := selectable[choice-1]
+		lotIDs = append(lotIDs, target.id)
+		volume = target.vol
+		value = target.amount
+	}
+
+	if len(lotIDs) == 0 {
+		return nil, 0, 0, fmt.Errorf("Не выбран ни один лот.")
+	}
+
+	fmt.Printf("[MDN] Выбрано лотов: %d (%d ГБ, %d руб)\n", len(lotIDs), volume, value)
+	return lotIDs, volume, value, nil
 }
 
 func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
@@ -167,6 +201,13 @@ func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
 		results = append(results, LotInfo{ID: lot.ID, IsBot: lot.My})
 	}
 	return results, nil
+}
+
+func GetTop4IDsAsync(volume, cost int, callback func([]LotInfo, error)) {
+	go func() {
+		lots, err := GetTop4IDs(volume, cost)
+		callback(lots, err)
+	}()
 }
 
 func Rocket(client *http.Client, bearer, number, lotID string) error {

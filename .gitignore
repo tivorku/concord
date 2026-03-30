@@ -1,5 +1,3 @@
-number.txt
-refresh.txt
 identity.key
 *.exe
 *.bin
@@ -11,3 +9,5 @@ main
 lotid.txt
 /private
 license.bin
+.env
+creds.json
