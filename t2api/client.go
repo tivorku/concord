@@ -24,6 +24,14 @@ const (
 	T2FullHost    = "yar.t2.ru:443"
 )
 
+func setTele2Headers(req *http.Request, apiVersion string) {
+	req.Header.Set("Tele2-User-Agent", AppVersion)
+	req.Header.Set("User-Agent", OkHttpVersion)
+	if apiVersion != "" {
+		req.Header.Set("X-API-Version", apiVersion)
+	}
+}
+
 func FetchCertificateFingerprint() error {
 	conn, err := tls.Dial("tcp", T2FullHost, nil)
 	if err != nil {

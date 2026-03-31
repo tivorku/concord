@@ -65,7 +65,6 @@ func MultiLogin() ([]*Account, error) {
 				}
 				continue
 			}
-			fmt.Printf("[Login] Токен для %s истёк, нужен SMS\n", acc.Number)
 		}
 
 		smsCode := RequestSms(acc.Number)

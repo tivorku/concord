@@ -13,9 +13,7 @@ func GetAccountLots(bearer, number string) ([]LotInfoDetailed, error) {
 	url := fmt.Sprintf("https://%s/api/subscribers/7%s/exchange/lots/created", T2Host, number)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Authorization", bearer)
-	req.Header.Set("Tele2-User-Agent", AppVersion)
-	req.Header.Set("X-API-Version", "2")
-	req.Header.Set("User-Agent", OkHttpVersion)
+	setTele2Headers(req, "2")
 
 	resp, err := SharedClient.Do(req)
 	if err != nil {
@@ -101,8 +99,7 @@ func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
 	}
 
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Tele2-User-Agent", AppVersion)
-	req.Header.Set("User-Agent", OkHttpVersion)
+	setTele2Headers(req, "")
 
 	resp, err := SharedClient.Do(req)
 	if err != nil {
@@ -158,9 +155,7 @@ func Rocket(client *http.Client, bearer, number, lotID string) error {
 	req, _ := http.NewRequest("PUT", url, bytes.NewBuffer(jsonData))
 	req.Header.Set("Authorization", bearer)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Tele2-User-Agent", AppVersion)
-	req.Header.Set("User-Agent", OkHttpVersion)
-	req.Header.Set("X-API-Version", "2")
+	setTele2Headers(req, "2")
 
 	resp, err := client.Do(req)
 	if err != nil {
