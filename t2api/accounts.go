@@ -6,30 +6,7 @@ import (
 	"os"
 )
 
-type Config struct {
-	Number  string `json:"number"`
-	Refresh string `json:"refresh"`
-}
-
-type AccountConfig struct {
-	ID      string `json:"id"`
-	Number  string `json:"number"`
-	Refresh string `json:"refresh"`
-}
-
-type AccountsFile struct {
-	Accounts []AccountConfig `json:"accounts"`
-}
-
-type Account struct {
-	ID      string
-	Number  string
-	Refresh string
-	Bearer  string
-}
-
 const accountsFile = "accounts.json"
-const configFile = "creds.json"
 
 func LoadAccounts() ([]*Account, error) {
 	data, err := os.ReadFile(accountsFile)
@@ -79,7 +56,6 @@ func MultiLogin() ([]*Account, error) {
 	}
 
 	for _, acc := range accounts {
-
 		if acc.Refresh != "" {
 			newRefresh, access, err := GetTokens(acc.Refresh)
 			if err == nil {

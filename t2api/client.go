@@ -13,10 +13,6 @@ import (
 )
 
 var (
-	yes_reset       = map[string]bool{"yes": true, "ye": true, "y": true}
-	no              = map[string]bool{"no": true, "n": true}
-	no_reset        = map[string]bool{"": true, "no": true, "n": true}
-	yes             = map[string]bool{"": true, "yes": true, "ye": true, "y": true}
 	SharedClient    *http.Client
 	certFingerprint string
 )
