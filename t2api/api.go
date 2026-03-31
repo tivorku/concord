@@ -14,13 +14,38 @@ type LotInfo struct {
 	ID    string
 	IsBot bool
 }
-
+type T2LotsResponse struct {
+	Data []struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+		Volume struct {
+			Value float64 `json:"value"`
+			UOM   string  `json:"uom"`
+		} `json:"volume"`
+		Cost struct {
+			Amount float64 `json:"amount"`
+		} `json:"cost"`
+		Seller struct {
+			Name   *string  `json:"name"`
+			Emojis []string `json:"emojis"`
+		} `json:"seller"`
+		CreationDate string `json:"creationDate"`
+	} `json:"data"`
+}
 type LotInfoDetailed struct {
 	ID       string
 	Name     string
+	UOM      string
 	Volume   int
 	Cost     int
 	IsActive bool
+}
+
+type Segment struct {
+	UOM    string
+	Volume int
+	Cost   int
+	Count  int
 }
 
 func GetAccountLots(bearer, number string) ([]LotInfoDetailed, error) {
@@ -63,6 +88,7 @@ func GetAccountLots(bearer, number string) ([]LotInfoDetailed, error) {
 		lots = append(lots, LotInfoDetailed{
 			ID:       lot.ID,
 			Name:     name,
+			UOM:      lot.Volume.UOM,
 			Volume:   int(lot.Volume.Value),
 			Cost:     int(lot.Cost.Amount),
 			IsActive: lot.Status == "active" && !tooOld,
@@ -72,80 +98,99 @@ func GetAccountLots(bearer, number string) ([]LotInfoDetailed, error) {
 	return lots, nil
 }
 
-func SelectAccountLots(account *Account) ([]string, error) {
-	lots, err := GetAccountLots(account.Bearer, account.Number)
-	if err != nil {
-		return nil, err
-	}
+func GetSegments(lots []LotInfoDetailed) []Segment {
+	segMap := make(map[string]Segment)
 
-	fmt.Printf("\n=== Аккаунт: %s (%s) ===\n", account.ID, account.Number)
-
-	var selectable []LotInfoDetailed
 	for _, lot := range lots {
-		if lot.IsActive {
-			selectable = append(selectable, lot)
-		}
-	}
-
-	if len(selectable) == 0 {
-		return nil, fmt.Errorf("Активные лоты не найдены для аккаунта %s", account.ID)
-	}
-
-	fmt.Printf("Всего лотов: %d\n", len(selectable))
-
-	for i, lot := range selectable {
-		fmt.Printf("%d. %-10s | %d ГБ | %d руб\n", i+1, lot.Name, lot.Volume, lot.Cost)
-	}
-
-	if len(selectable) > 5 {
-		fmt.Printf("[MDN] Ограничено до 5 лотов\n")
-		selectable = selectable[:5]
-	}
-
-	fmt.Print("\nВыберите номера лотов (через пробел, например: 1 2 3): ")
-	var choices string
-	fmt.Scanln(&choices)
-
-	var selected []int
-	for _, c := range strings.Fields(choices) {
-		var num int
-		fmt.Sscanf(c, "%d", &num)
-		selected = append(selected, num)
-	}
-
-	if len(selected) == 0 {
-		return nil, fmt.Errorf("Не выбран ни один лот.")
-	}
-
-	var lotIDs []string
-	for _, choice := range selected {
-		if choice < 1 || choice > len(selectable) {
+		if !lot.IsActive {
 			continue
 		}
-		lotIDs = append(lotIDs, selectable[choice-1].ID)
+		key := fmt.Sprintf("%s-%d-%d", lot.UOM, lot.Volume, lot.Cost)
+		seg := segMap[key]
+		seg.UOM = lot.UOM
+		seg.Volume = lot.Volume
+		seg.Cost = lot.Cost
+		seg.Count++
+		segMap[key] = seg
 	}
 
-	fmt.Printf("[MDN] Выбрано лотов: %d\n", len(lotIDs))
-	return lotIDs, nil
+	var segments []Segment
+	for _, seg := range segMap {
+		segments = append(segments, seg)
+	}
+	return segments
 }
 
-type T2LotsResponse struct {
-	Data []struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
-		Volume struct {
-			Value float64 `json:"value"`
-			UOM   string  `json:"uom"`
-		} `json:"volume"`
-		Cost struct {
-			Amount float64 `json:"amount"`
-		} `json:"cost"`
-		Seller struct {
-			Name   *string  `json:"name"`
-			Emojis []string `json:"emojis"`
-		} `json:"seller"`
-		CreationDate string `json:"creationDate"`
-	} `json:"data"`
+func FilterLotsBySegment(lots []LotInfoDetailed, seg Segment) []string {
+	var lotIDs []string
+	for _, lot := range lots {
+		if lot.IsActive && lot.UOM == seg.UOM && lot.Volume == seg.Volume && lot.Cost == seg.Cost {
+			lotIDs = append(lotIDs, lot.ID)
+		}
+	}
+	return lotIDs
+}
+
+func UOMDisplayName(uom string) string {
+	switch uom {
+	case "data":
+		return "Data"
+	case "voice":
+		return "Voice"
+	case "sms":
+		return "SMS"
+	default:
+		return uom
+	}
+}
+
+func SelectSegment(segments []Segment) (Segment, error) {
+	if len(segments) == 0 {
+		return Segment{}, fmt.Errorf("Нет доступных сегментов")
+	}
+
+	segmentsByUOM := make(map[string][]Segment)
+	for _, seg := range segments {
+		segmentsByUOM[seg.UOM] = append(segmentsByUOM[seg.UOM], seg)
+	}
+
+	fmt.Println("\n=== Выберите тип трафика ===")
+	var uomList []string
+	i := 1
+	for uom := range segmentsByUOM {
+		count := 0
+		for _, s := range segmentsByUOM[uom] {
+			count += s.Count
+		}
+		fmt.Printf("%d. %s  [%d лотов]\n", i, UOMDisplayName(uom), count)
+		uomList = append(uomList, uom)
+		i++
+	}
+
+	fmt.Print("> ")
+	var choice int
+	fmt.Scanln(&choice)
+	if choice < 1 || choice > len(uomList) {
+		return Segment{}, fmt.Errorf("Неверный выбор типа трафика")
+	}
+	selectedUOM := uomList[choice-1]
+
+	selectedSegments := segmentsByUOM[selectedUOM]
+	fmt.Printf("\n=== %s сегменты ===\n", UOMDisplayName(selectedUOM))
+	for j, seg := range selectedSegments {
+		fmt.Printf("%d. %d %s за %d руб  (%d лотов)\n", j+1, seg.Volume, seg.UOM, seg.Cost, seg.Count)
+	}
+
+	fmt.Print("> ")
+	fmt.Scanln(&choice)
+	if choice < 1 || choice > len(selectedSegments) {
+		return Segment{}, fmt.Errorf("Неверный выбор сегмента")
+	}
+
+	selectedSeg := selectedSegments[choice-1]
+	fmt.Printf("[MDN] Выбран сегмент: %d %s за %d руб (%d лотов)\n", selectedSeg.Volume, selectedSeg.UOM, selectedSeg.Cost, selectedSeg.Count)
+
+	return selectedSeg, nil
 }
 
 func ShowAndSelectLot(bearer, number string) (string, int, int, error) {

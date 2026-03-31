@@ -12,6 +12,11 @@ import (
 	"time"
 )
 
+type SelectedLot struct {
+	LotID     string
+	AccountID string
+}
+
 func main() {
 	hideAndroidRestrictedNetworkError()
 
@@ -31,26 +36,51 @@ func main() {
 		os.Exit(1)
 	}
 
-	type SelectedLot struct {
-		LotID     string
-		AccountID string
+	type AccountLots struct {
+		Account *t2api.Account
+		Lots    []t2api.LotInfoDetailed
 	}
-	var myLots []SelectedLot
+	var accountLots []AccountLots
 
 	for _, acc := range accounts {
-		lotIDs, err := t2api.SelectAccountLots(acc)
+		fmt.Printf("[MDN] Получаю лоты аккаунта %s...\n", acc.ID)
+		lots, err := t2api.GetAccountLots(acc.Bearer, acc.Number)
 		if err != nil {
 			fmt.Printf("[Error] %v\n", err)
 			continue
 		}
+		accountLots = append(accountLots, AccountLots{Account: acc, Lots: lots})
+		fmt.Printf("[MDN] Получено %d лотов\n", len(lots))
+	}
+
+	var allLots []t2api.LotInfoDetailed
+	for _, al := range accountLots {
+		allLots = append(allLots, al.Lots...)
+	}
+
+	segments := t2api.GetSegments(allLots)
+	if len(segments) == 0 {
+		fmt.Println("Нет доступных сегментов")
+		os.Exit(1)
+	}
+
+	selectedSegment, err := t2api.SelectSegment(segments)
+	if err != nil {
+		fmt.Printf("[Error] %v\n", err)
+		os.Exit(1)
+	}
+
+	var myLots []SelectedLot
+	for _, al := range accountLots {
+		lotIDs := t2api.FilterLotsBySegment(al.Lots, selectedSegment)
 		for _, lotID := range lotIDs {
-			myLots = append(myLots, SelectedLot{LotID: lotID, AccountID: acc.ID})
-			myLedger.SetLotAccount(lotID, acc)
+			myLots = append(myLots, SelectedLot{LotID: lotID, AccountID: al.Account.ID})
+			myLedger.SetLotAccount(lotID, al.Account)
 		}
 	}
 
 	if len(myLots) == 0 {
-		fmt.Println("Не выбран ни один лот")
+		fmt.Println("Нет лотов в выбранном сегменте")
 		os.Exit(1)
 	}
 
@@ -59,10 +89,7 @@ func main() {
 		myLotIDs = append(myLotIDs, lot.LotID)
 	}
 
-	var (
-		volume int = 43
-		value  int = 645
-	)
+	fmt.Printf("[MDN] Всего для регистрации: %d лотов\n", len(myLots))
 
 	privKey, _ := p2p.GetPrivateKey("identity.key")
 
@@ -74,7 +101,7 @@ func main() {
 
 	node := &p2p.Node{Host: h, Ledger: myLedger, Ctx: ctx}
 
-	rendezvous := p2p.GetProtocolID(volume, value)
+	rendezvous := p2p.GetProtocolID(selectedSegment.Volume, selectedSegment.Cost)
 
 	p2p.StartDiscovery(ctx, h, rendezvous)
 	go func() {
@@ -91,7 +118,7 @@ func main() {
 		}
 	}()
 	go myLedger.StartJanitor(ctx, node)
-	core := p2p.InitLogicCore(myLedger, myLotIDs, volume, value, privKey, accounts, node)
+	core := p2p.InitLogicCore(myLedger, myLotIDs, selectedSegment.Volume, selectedSegment.Cost, privKey, accounts, node)
 	node.RegisterProxyHandler()
 	node.Topic, _ = p2p.StartPubSub(ctx, h, rendezvous, myLedger, core)
 
