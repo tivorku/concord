@@ -38,7 +38,7 @@ func main() {
 	var myLotIDs []string
 	var uom string
 	var volume, value int
-
+    bearer, number := t2api.Login()
 	if *useMock {
 		LotBytes, err := os.ReadFile("lotid.txt")
 		if err != nil {
@@ -61,7 +61,6 @@ func main() {
 		value = *mockValue
 		fmt.Printf("[MDN] Mock mode: %d lots, %s, %d ГБ, %d руб\n", len(myLotIDs), uom, volume, value)
 	} else {
-		bearer, number := t2api.Login()
 
 		segments, err := t2api.GetSegments(bearer, number)
 		if err != nil {
@@ -91,7 +90,7 @@ func main() {
 		volume = selectedSeg.Volume
 		value = selectedSeg.Cost
 	}
-
+    
 	privKey, _ := p2p.GetPrivateKey("identity.key")
 
 	h, err := p2p.InitHost(ctx, privKey)
@@ -117,7 +116,6 @@ func main() {
 		}
 	}()
 	go myLedger.StartJanitor(ctx, node)
-	bearer, number := t2api.Login()
 	core := p2p.InitLogicCore(myLedger, myLotIDs, volume, value, privKey, bearer, number, node)
 	node.RegisterProxyHandler()
 	node.Topic, _ = p2p.StartPubSub(ctx, h, rendezvous, myLedger, core)

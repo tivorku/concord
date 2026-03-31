@@ -119,7 +119,7 @@ func SelectSegment(segments []Segment) (Segment, error) {
 		for _, s := range segmentsByUOM[uom] {
 			count += s.Count
 		}
-		fmt.Printf("%d. %s  [%d лотов]\n", i, UOMDisplayName(uom), count)
+		fmt.Printf("%d. %s [%d лотов]\n", i, UOMDisplayName(uom), count)
 		uomList = append(uomList, uom)
 		i++
 	}
@@ -133,9 +133,9 @@ func SelectSegment(segments []Segment) (Segment, error) {
 	selectedUOM := uomList[choice-1]
 
 	selectedSegments := segmentsByUOM[selectedUOM]
-	fmt.Printf("\n=== %s сегменты ===\n", UOMDisplayName(selectedUOM))
+	fmt.Printf("\n=== Доступные сегменты %s ===\n", UOMDisplayName(selectedUOM))
 	for j, seg := range selectedSegments {
-		fmt.Printf("%d. %d %s за %d руб  (%d лотов)\n", j+1, seg.Volume, UOMDisplayName(seg.UOM), seg.Cost, seg.Count)
+		fmt.Printf("%d. %d %s за %d руб (%d лотов)\n", j+1, seg.Volume, UOMDisplayName(seg.UOM), seg.Cost, seg.Count)
 	}
 
 	fmt.Print("> ")
