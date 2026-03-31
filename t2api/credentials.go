@@ -13,6 +13,12 @@ type Config struct {
 
 const configFile = "creds.json"
 
+var (
+	yesReset = map[string]bool{"yes": true, "ye": true, "y": true}
+	noReset  = map[string]bool{"": true, "no": true, "n": true}
+	yes记住    = map[string]bool{"": true, "yes": true, "ye": true, "y": true}
+)
+
 func loadConfig() Config {
 	var cfg Config
 	data, err := os.ReadFile(configFile)
@@ -22,7 +28,6 @@ func loadConfig() Config {
 	return cfg
 }
 
-// saveConfig сохраняет данные структуры в JSON-файл
 func saveConfig(cfg Config) {
 	data, _ := json.MarshalIndent(cfg, "", "  ")
 	os.WriteFile(configFile, data, 0644)
@@ -73,8 +78,8 @@ func TryAnotherNumber(cfg *Config) {
 	var resetNumber string
 	fmt.Print("Ввести другой номер телефона? (y/N): ")
 	fmt.Scanln(&resetNumber)
-	
-	if yes_reset[resetNumber] {
+
+	if yesReset[resetNumber] {
 		cfg.Number = ""
 		cfg.Refresh = ""
 		saveConfig(*cfg)
@@ -87,17 +92,17 @@ func GetNumber(cfg *Config) string {
 
 	cfg.Refresh = ""
 	saveConfig(*cfg)
-    for number == "" || len(number) != 10 {
-    	fmt.Print("Введите номер телефона: +7")
-    	fmt.Scanln(&number)
-    	if number == "" || len(number) != 10 {
-    	    fmt.Println("Неверно введен номер телефона!")
-    	}
+	for number == "" || len(number) != 10 {
+		fmt.Print("Введите номер телефона: +7")
+		fmt.Scanln(&number)
+		if number == "" || len(number) != 10 {
+			fmt.Println("Неверно введен номер телефона!")
+		}
 	}
 	fmt.Print("Запомнить номер телефона? (Y/n): ")
 	fmt.Scanln(&rememberNumber)
 
-	if yes[rememberNumber] {
+	if yes记住[rememberNumber] {
 		cfg.Number = number
 		saveConfig(*cfg)
 	}

@@ -38,7 +38,7 @@ func main() {
 	var myLotIDs []string
 	var uom string
 	var volume, value int
-    bearer, number := t2api.Login()
+	bearer, number := t2api.Login()
 	if *useMock {
 		LotBytes, err := os.ReadFile("lotid.txt")
 		if err != nil {
@@ -61,8 +61,7 @@ func main() {
 		value = *mockValue
 		fmt.Printf("[MDN] Mock mode: %d lots, %s, %d ГБ, %d руб\n", len(myLotIDs), uom, volume, value)
 	} else {
-
-		segments, err := t2api.GetSegments(bearer, number)
+		segments, lots, err := t2api.GetSegments(bearer, number)
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
@@ -74,12 +73,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		var err2 error
-		myLotIDs, err2 = t2api.FilterLotsBySegment(bearer, number, selectedSeg)
-		if err2 != nil {
-			fmt.Println(err2)
-			os.Exit(1)
-		}
+		myLotIDs = t2api.FilterLotsBySegment(lots, selectedSeg)
 
 		if len(myLotIDs) == 0 {
 			fmt.Println("Нет лотов в выбранном сегменте")
@@ -90,7 +84,7 @@ func main() {
 		volume = selectedSeg.Volume
 		value = selectedSeg.Cost
 	}
-    
+
 	privKey, _ := p2p.GetPrivateKey("identity.key")
 
 	h, err := p2p.InitHost(ctx, privKey)

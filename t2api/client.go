@@ -13,10 +13,6 @@ import (
 )
 
 var (
-	yes_reset       = map[string]bool{"yes": true, "ye": true, "y": true}
-	no              = map[string]bool{"no": true, "n": true}
-	no_reset        = map[string]bool{"": true, "no": true, "n": true}
-	yes             = map[string]bool{"": true, "yes": true, "ye": true, "y": true}
 	SharedClient    *http.Client
 	certFingerprint string
 )
@@ -27,6 +23,14 @@ const (
 	T2Host        = "yar.t2.ru"
 	T2FullHost    = "yar.t2.ru:443"
 )
+
+func setTele2Headers(req *http.Request, apiVersion string) {
+	req.Header.Set("Tele2-User-Agent", AppVersion)
+	req.Header.Set("User-Agent", OkHttpVersion)
+	if apiVersion != "" {
+		req.Header.Set("X-API-Version", apiVersion)
+	}
+}
 
 func FetchCertificateFingerprint() error {
 	conn, err := tls.Dial("tcp", T2FullHost, nil)
