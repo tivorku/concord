@@ -17,6 +17,7 @@ import (
 )
 
 const (
+	TestUOM       = "data"
 	TestVolume    = 10
 	TestValue     = 100
 	TestTimeLimit = 20 * time.Second
@@ -69,7 +70,7 @@ func createTestNode(ctx context.Context, id int) (*TestNode, error) {
 		return nil, err
 	}
 
-	topic, err := ps.Join(fmt.Sprintf("test-segment-%d-%d", TestVolume, TestValue))
+	topic, err := ps.Join(fmt.Sprintf("test-segment-%s-%d-%d", TestUOM, TestVolume, TestValue))
 	if err != nil {
 		h.Close()
 		return nil, err

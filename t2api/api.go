@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -15,34 +14,27 @@ type LotInfo struct {
 	IsBot bool
 }
 
-type T2LotsResponse struct {
-	Data []struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
-		Volume struct {
-			Value float64 `json:"value"`
-			UOM   string  `json:"uom"`
-		} `json:"volume"`
-		Cost struct {
-			Amount float64 `json:"amount"`
-		} `json:"cost"`
-		Seller struct {
-			Name   *string  `json:"name"`
-			Emojis []string `json:"emojis"`
-		} `json:"seller"`
-		CreationDate string `json:"creationDate"`
-	} `json:"data"`
+type Segment struct {
+	UOM    string
+	Volume int
+	Cost   int
+	Count  int
 }
 
-func ShowAndSelectLot(bearer, number string) (string, int, int, error) {
-	lotIDs, volume, value, err := SelectLots(bearer, number)
-	if err != nil {
-		return "", 0, 0, err
+func UOMDisplayName(uom string) string {
+	switch uom {
+	case "gb":
+		return "ГБ"
+	case "min":
+		return "Минуты"
+	case "sms":
+		return "SMS"
+	default:
+		return uom
 	}
-	return lotIDs[0], volume, value, nil
 }
 
-func SelectLots(bearer, number string) ([]string, int, int, error) {
+func GetSegments(bearer, number string) ([]Segment, error) {
 	url := fmt.Sprintf("https://%s/api/subscribers/7%s/exchange/lots/created", T2Host, number)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Authorization", bearer)
@@ -52,32 +44,34 @@ func SelectLots(bearer, number string) ([]string, int, int, error) {
 
 	resp, err := SharedClient.Do(req)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, 0, 0, fmt.Errorf("Т2 вернул ошибку: %d", resp.StatusCode)
+		return nil, fmt.Errorf("Т2 вернул ошибку: %d", resp.StatusCode)
 	}
 
-	var res T2LotsResponse
+	var res struct {
+		Data []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+			Volume struct {
+				Value float64 `json:"value"`
+				UOM   string  `json:"uom"`
+			} `json:"volume"`
+			Cost struct {
+				Amount float64 `json:"amount"`
+			} `json:"cost"`
+			CreationDate string `json:"creationDate"`
+		} `json:"data"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return nil, 0, 0, fmt.Errorf("Ошибка парсинга JSON: %v", err)
+		return nil, fmt.Errorf("Ошибка парсинга JSON: %v", err)
 	}
 
-	fmt.Printf("[DEBUG] Всего лотов получено: %d\n", len(res.Data))
-
-	type activeLot struct {
-		id     string
-		vol    int
-		amount int
-	}
-	var selectable []activeLot
-	count := 0
-
-	for i := len(res.Data) - 1; i >= 0; i-- {
-		lot := res.Data[i]
-
+	segMap := make(map[string]Segment)
+	for _, lot := range res.Data {
 		if lot.Status != "active" {
 			continue
 		}
@@ -86,67 +80,134 @@ func SelectLots(bearer, number string) ([]string, int, int, error) {
 		if err != nil {
 			t, _ = time.Parse("2006-01-02T15:04:05Z", lot.CreationDate)
 		}
-
 		if time.Since(t).Hours() > 30*24 {
 			continue
 		}
 
-		count++
-		name := "Аноним"
-		if lot.Seller.Name != nil {
-			name = *lot.Seller.Name
+		key := fmt.Sprintf("%s-%d-%d", lot.Volume.UOM, int(lot.Volume.Value), int(lot.Cost.Amount))
+		seg := segMap[key]
+		seg.UOM = lot.Volume.UOM
+		seg.Volume = int(lot.Volume.Value)
+		seg.Cost = int(lot.Cost.Amount)
+		seg.Count++
+		segMap[key] = seg
+	}
+
+	var segments []Segment
+	for _, seg := range segMap {
+		segments = append(segments, seg)
+	}
+
+	return segments, nil
+}
+
+func SelectSegment(segments []Segment) (Segment, error) {
+	if len(segments) == 0 {
+		return Segment{}, fmt.Errorf("Нет доступных сегментов")
+	}
+
+	segmentsByUOM := make(map[string][]Segment)
+	for _, seg := range segments {
+		segmentsByUOM[seg.UOM] = append(segmentsByUOM[seg.UOM], seg)
+	}
+
+	fmt.Println("\n=== Выберите тип трафика ===")
+	var uomList []string
+	i := 1
+	for uom := range segmentsByUOM {
+		count := 0
+		for _, s := range segmentsByUOM[uom] {
+			count += s.Count
 		}
-
-		v := int(lot.Volume.Value)
-		c := int(lot.Cost.Amount)
-
-		fmt.Printf("%d. %-10s | %d %s | %d руб\n", count, name, v, lot.Volume.UOM, c)
-		selectable = append(selectable, activeLot{lot.ID, v, c})
+		fmt.Printf("%d. %s  [%d лотов]\n", i, UOMDisplayName(uom), count)
+		uomList = append(uomList, uom)
+		i++
 	}
 
-	if len(selectable) == 0 {
-		return nil, 0, 0, fmt.Errorf("Активные лоты не найдены. Создайте лот на Маркете вручную.")
+	fmt.Print("> ")
+	var choice int
+	fmt.Scanln(&choice)
+	if choice < 1 || choice > len(uomList) {
+		return Segment{}, fmt.Errorf("Неверный выбор типа трафика")
+	}
+	selectedUOM := uomList[choice-1]
+
+	selectedSegments := segmentsByUOM[selectedUOM]
+	fmt.Printf("\n=== %s сегменты ===\n", UOMDisplayName(selectedUOM))
+	for j, seg := range selectedSegments {
+		fmt.Printf("%d. %d %s за %d руб  (%d лотов)\n", j+1, seg.Volume, UOMDisplayName(seg.UOM), seg.Cost, seg.Count)
 	}
 
-	if len(selectable) > 5 {
-		selectable = selectable[:5]
-		fmt.Printf("[MDN] Ограничено до 5 лотов\n")
+	fmt.Print("> ")
+	fmt.Scanln(&choice)
+	if choice < 1 || choice > len(selectedSegments) {
+		return Segment{}, fmt.Errorf("Неверный выбор сегмента")
 	}
 
-	fmt.Print("\nВыберите номера лотов (через пробел, например: 1 2 3): ")
-	var choices string
-	fmt.Scanln(&choices)
+	selectedSeg := selectedSegments[choice-1]
+	fmt.Printf("[MDN] Выбран сегмент: %d %s за %d руб (%d лотов)\n", selectedSeg.Volume, UOMDisplayName(selectedSeg.UOM), selectedSeg.Cost, selectedSeg.Count)
 
-	var selected []int
-	for _, c := range strings.Fields(choices) {
-		var num int
-		fmt.Sscanf(c, "%d", &num)
-		selected = append(selected, num)
+	return selectedSeg, nil
+}
+
+func FilterLotsBySegment(bearer, number string, seg Segment) ([]string, error) {
+	url := fmt.Sprintf("https://%s/api/subscribers/7%s/exchange/lots/created", T2Host, number)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("Authorization", bearer)
+	req.Header.Set("Tele2-User-Agent", AppVersion)
+	req.Header.Set("X-API-Version", "2")
+	req.Header.Set("User-Agent", OkHttpVersion)
+
+	resp, err := SharedClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("Т2 вернул ошибку: %d", resp.StatusCode)
 	}
 
-	if len(selected) == 0 {
-		return nil, 0, 0, fmt.Errorf("Не выбран ни один лот.")
+	var res struct {
+		Data []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+			Volume struct {
+				Value float64 `json:"value"`
+				UOM   string  `json:"uom"`
+			} `json:"volume"`
+			Cost struct {
+				Amount float64 `json:"amount"`
+			} `json:"cost"`
+			CreationDate string `json:"creationDate"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, fmt.Errorf("Ошибка парсинга JSON: %v", err)
 	}
 
 	var lotIDs []string
-	var volume, value int
-
-	for _, choice := range selected {
-		if choice < 1 || choice > len(selectable) {
+	for _, lot := range res.Data {
+		if lot.Status != "active" {
 			continue
 		}
-		target := selectable[choice-1]
-		lotIDs = append(lotIDs, target.id)
-		volume = target.vol
-		value = target.amount
+
+		t, err := time.Parse(time.RFC3339, lot.CreationDate)
+		if err != nil {
+			t, _ = time.Parse("2006-01-02T15:04:05Z", lot.CreationDate)
+		}
+		if time.Since(t).Hours() > 30*24 {
+			continue
+		}
+
+		if lot.Volume.UOM == seg.UOM &&
+			int(lot.Volume.Value) == seg.Volume &&
+			int(lot.Cost.Amount) == seg.Cost {
+			lotIDs = append(lotIDs, lot.ID)
+		}
 	}
 
-	if len(lotIDs) == 0 {
-		return nil, 0, 0, fmt.Errorf("Не выбран ни один лот.")
-	}
-
-	fmt.Printf("[MDN] Выбрано лотов: %d (%d ГБ, %d руб)\n", len(lotIDs), volume, value)
-	return lotIDs, volume, value, nil
+	return lotIDs, nil
 }
 
 func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
@@ -157,7 +218,6 @@ func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
 		return nil, err
 	}
 
-	// устанавливаем заголовки ТОЧНО как в рабочем скрипте
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Tele2-User-Agent", AppVersion)
 	req.Header.Set("User-Agent", OkHttpVersion)

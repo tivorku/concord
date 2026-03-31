@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"flag"
 	"fmt"
 	"market-denet/p2p"
 	"market-denet/t2api"
@@ -12,7 +13,16 @@ import (
 	"time"
 )
 
+var (
+	useMock   = flag.Bool("mock", false, "Use lotid.txt mock instead of segment selection")
+	mockUOM   = flag.String("uom", "data", "UOM for mock mode (data, voice, sms)")
+	mockVol   = flag.Int("volume", 1, "Volume for mock mode")
+	mockValue = flag.Int("value", 15, "Value/cost for mock mode")
+)
+
 func main() {
+	flag.Parse()
+
 	hideAndroidRestrictedNetworkError()
 
 	if err := t2api.FetchCertificateFingerprint(); err != nil {
@@ -25,35 +35,62 @@ func main() {
 
 	myLedger := p2p.NewLedger()
 
-	bearer, number := t2api.Login()
-	/*myLotIDs, volume, value, err := t2api.SelectLots(bearer, number)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}*/
-
-	// MOCKING myLotID FOR TESTING
-	LotBytes, err := os.ReadFile("lotid.txt")
-	if err != nil {
-		fmt.Printf("Failed to read lotid.txt: %v\n", err)
-		os.Exit(1)
-	}
-	lines := strings.Split(strings.TrimSpace(string(LotBytes)), "\n")
 	var myLotIDs []string
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			myLotIDs = append(myLotIDs, line)
+	var uom string
+	var volume, value int
+
+	if *useMock {
+		LotBytes, err := os.ReadFile("lotid.txt")
+		if err != nil {
+			fmt.Printf("Failed to read lotid.txt: %v\n", err)
+			os.Exit(1)
 		}
+		lines := strings.Split(strings.TrimSpace(string(LotBytes)), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				myLotIDs = append(myLotIDs, line)
+			}
+		}
+		if len(myLotIDs) == 0 {
+			fmt.Println("No lot IDs found in lotid.txt")
+			os.Exit(1)
+		}
+		uom = *mockUOM
+		volume = *mockVol
+		value = *mockValue
+		fmt.Printf("[MDN] Mock mode: %d lots, %s, %d ГБ, %d руб\n", len(myLotIDs), uom, volume, value)
+	} else {
+		bearer, number := t2api.Login()
+
+		segments, err := t2api.GetSegments(bearer, number)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+
+		selectedSeg, err := t2api.SelectSegment(segments)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+
+		var err2 error
+		myLotIDs, err2 = t2api.FilterLotsBySegment(bearer, number, selectedSeg)
+		if err2 != nil {
+			fmt.Println(err2)
+			os.Exit(1)
+		}
+
+		if len(myLotIDs) == 0 {
+			fmt.Println("Нет лотов в выбранном сегменте")
+			os.Exit(1)
+		}
+
+		uom = selectedSeg.UOM
+		volume = selectedSeg.Volume
+		value = selectedSeg.Cost
 	}
-	if len(myLotIDs) == 0 {
-		fmt.Println("No lot IDs found in lotid.txt")
-		os.Exit(1)
-	}
-	var (
-		volume int = 43
-		value  int = 645
-	)
 
 	privKey, _ := p2p.GetPrivateKey("identity.key")
 
@@ -65,7 +102,7 @@ func main() {
 
 	node := &p2p.Node{Host: h, Ledger: myLedger, Ctx: ctx}
 
-	rendezvous := p2p.GetProtocolID(volume, value)
+	rendezvous := p2p.GetProtocolID(uom, volume, value)
 
 	p2p.StartDiscovery(ctx, h, rendezvous)
 	go func() {
@@ -80,6 +117,7 @@ func main() {
 		}
 	}()
 	go myLedger.StartJanitor(ctx, node)
+	bearer, number := t2api.Login()
 	core := p2p.InitLogicCore(myLedger, myLotIDs, volume, value, privKey, bearer, number, node)
 	node.RegisterProxyHandler()
 	node.Topic, _ = p2p.StartPubSub(ctx, h, rendezvous, myLedger, core)
