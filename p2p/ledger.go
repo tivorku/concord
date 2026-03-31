@@ -3,12 +3,13 @@ package p2p
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"sort"
+	"market-denet/t2api"
 )
 
 type Participant struct {
@@ -21,17 +22,32 @@ type Participant struct {
 	LastEpoch   int64
 	JoinedAt    int64
 	LastSeen    time.Time
+	AccountID   string
 }
 
 type Ledger struct {
-	mu      sync.RWMutex
-	Members map[string][]*Participant // ключ = PeerID.String()
+	mu          sync.RWMutex
+	Members     map[string][]*Participant
+	lotAccounts map[string]*t2api.Account
 }
 
 func NewLedger() *Ledger {
 	return &Ledger{
-		Members: make(map[string][]*Participant),
+		Members:     make(map[string][]*Participant),
+		lotAccounts: make(map[string]*t2api.Account),
 	}
+}
+
+func (l *Ledger) SetLotAccount(lotID string, account *t2api.Account) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.lotAccounts[lotID] = account
+}
+
+func (l *Ledger) GetAccountByLot(lotID string) *t2api.Account {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.lotAccounts[lotID]
 }
 
 func (p *Participant) TrustScore() float64 {
@@ -55,7 +71,7 @@ func (l *Ledger) IsLotKnown(lotID string) bool {
 	return false
 }
 
-func (l *Ledger) Update(lotID string, pID peer.ID, pubKey crypto.PubKey, incomingT int64, incomingR int64, joinedAt int64, lastTopTick int64, incomingEpoch int64) bool {
+func (l *Ledger) Update(lotID string, pID peer.ID, pubKey crypto.PubKey, incomingT int64, incomingR int64, joinedAt int64, lastTopTick int64, incomingEpoch int64, accountID string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -68,7 +84,6 @@ func (l *Ledger) Update(lotID string, pID peer.ID, pubKey crypto.PubKey, incomin
 	peerKey := pID.String()
 	participants := l.Members[peerKey]
 
-	// Ищем существующий лот от этого пира
 	var p *Participant
 	for _, part := range participants {
 		if part.LotID == lotID {
@@ -78,7 +93,6 @@ func (l *Ledger) Update(lotID string, pID peer.ID, pubKey crypto.PubKey, incomin
 	}
 
 	if p == nil {
-		// Новый лот
 		l.Members[peerKey] = append(participants, &Participant{
 			LotID:       lotID,
 			PeerID:      pID,
@@ -89,6 +103,7 @@ func (l *Ledger) Update(lotID string, pID peer.ID, pubKey crypto.PubKey, incomin
 			JoinedAt:    joinedAt,
 			LastSeen:    time.Now(),
 			LastEpoch:   incomingEpoch,
+			AccountID:   accountID,
 		})
 		return false
 	}

@@ -40,7 +40,7 @@ func TestUpdate_NewParticipant(t *testing.T) {
 	now := time.Now().Unix()
 	epoch := GetCurrentEpoch()
 
-	needsCorrection := ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch)
+	needsCorrection := ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch, "test-acc")
 
 	if needsCorrection {
 		t.Error("New participant should not need correction")
@@ -59,8 +59,8 @@ func TestUpdate_ExistingParticipant(t *testing.T) {
 	now := time.Now().Unix()
 	epoch := GetCurrentEpoch()
 
-	ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch)
-	needsCorrection := ledger.Update("lot-123", pID, pubKey, 110, 6, now, now, epoch)
+	ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch, "test-acc")
+	needsCorrection := ledger.Update("lot-123", pID, pubKey, 110, 6, now, now, epoch, "test-acc")
 
 	if needsCorrection {
 		t.Error("Existing participant with valid update should not need correction")
@@ -73,9 +73,9 @@ func TestUpdate_EpochDiffTooLarge(t *testing.T) {
 	now := time.Now().Unix()
 	epoch := GetCurrentEpoch()
 
-	ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch)
+	ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch, "test-acc")
 
-	needsCorrection := ledger.Update("lot-123", pID, pubKey, 110, 6, now, now, epoch+5)
+	needsCorrection := ledger.Update("lot-123", pID, pubKey, 110, 6, now, now, epoch+5, "test-acc")
 
 	if needsCorrection {
 		t.Error("Message with epoch diff > 1 should be rejected (returns false)")
@@ -88,8 +88,8 @@ func TestUpdate_TManipulation_Plus3Max(t *testing.T) {
 	now := time.Now().Unix()
 	epoch := GetCurrentEpoch()
 
-	ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch)
-	ledger.Update("lot-123", pID, pubKey, 200, 6, now, now, epoch)
+	ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch, "test-acc")
+	ledger.Update("lot-123", pID, pubKey, 200, 6, now, now, epoch, "test-acc")
 
 	ledger.mu.RLock()
 	p := ledger.Members[pID.String()][0]
@@ -107,8 +107,8 @@ func TestUpdate_RManipulation_Plus1Max(t *testing.T) {
 	now := time.Now().Unix()
 	epoch := GetCurrentEpoch()
 
-	ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch)
-	ledger.Update("lot-123", pID, pubKey, 110, 10, now, now, epoch)
+	ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch, "test-acc")
+	ledger.Update("lot-123", pID, pubKey, 110, 10, now, now, epoch, "test-acc")
 
 	ledger.mu.RLock()
 	p := ledger.Members[pID.String()][0]
@@ -125,8 +125,8 @@ func TestUpdate_JoinedAtUpdate(t *testing.T) {
 	pID, pubKey := generateTestPeer()
 	epoch := GetCurrentEpoch()
 
-	ledger.Update("lot-123", pID, pubKey, 100, 5, 900, 900, epoch)
-	ledger.Update("lot-123", pID, pubKey, 110, 6, 1000, 1100, epoch)
+	ledger.Update("lot-123", pID, pubKey, 100, 5, 900, 900, epoch, "test-acc")
+	ledger.Update("lot-123", pID, pubKey, 110, 6, 1000, 1100, epoch, "test-acc")
 
 	ledger.mu.RLock()
 	p := ledger.Members[pID.String()][0]
@@ -149,7 +149,7 @@ func TestUpdate_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			ledger.Update("lot-123", pID, pubKey, int64(100+idx), 5, now, now, epoch)
+			ledger.Update("lot-123", pID, pubKey, int64(100+idx), 5, now, now, epoch, "test-acc")
 		}(i)
 	}
 	wg.Wait()
@@ -165,7 +165,7 @@ func TestUpdateTicks(t *testing.T) {
 	now := time.Now().Unix()
 	epoch := GetCurrentEpoch()
 
-	ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch)
+	ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch, "test-acc")
 
 	ledger.mu.RLock()
 	oldT := ledger.Members[pID.String()][0].T
@@ -209,7 +209,7 @@ func TestGetSortedQueue(t *testing.T) {
 	now := time.Now().Unix()
 	epoch := GetCurrentEpoch()
 
-	ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch)
+	ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch, "test-acc")
 
 	queue := ledger.GetSortedQueue(&Node{})
 	if len(queue) != 1 {

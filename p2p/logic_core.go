@@ -37,11 +37,15 @@ type LogicCore struct {
 	lastMyShotTime map[string]time.Time
 	isExecuting    bool
 	shootMu        sync.Mutex
-	bearer         string
-	number         string
+	accounts       map[string]*t2api.Account
 }
 
-func InitLogicCore(l *Ledger, myLotIDs []string, vol int, val int, privKey crypto.PrivKey, bearer, number string, node *Node) *LogicCore {
+func InitLogicCore(l *Ledger, myLotIDs []string, vol int, val int, privKey crypto.PrivKey, accounts []*t2api.Account, node *Node) *LogicCore {
+	accountMap := make(map[string]*t2api.Account)
+	for _, acc := range accounts {
+		accountMap[acc.ID] = acc
+	}
+
 	lc := &LogicCore{
 		ledger:         l,
 		myLotIDs:       myLotIDs,
@@ -50,13 +54,19 @@ func InitLogicCore(l *Ledger, myLotIDs []string, vol int, val int, privKey crypt
 		privKey:        privKey,
 		lastMyShotTime: make(map[string]time.Time),
 		isExecuting:    false,
-		bearer:         bearer,
-		number:         number,
+		accounts:       accountMap,
 	}
 	for _, lotID := range myLotIDs {
 		lc.lastMyShotTime[lotID] = time.Now().Add(-1 * time.Hour)
 	}
 	return lc
+}
+
+func (lc *LogicCore) findAccountByLotID(lotID string) *t2api.Account {
+	if acc := lc.ledger.GetAccountByLot(lotID); acc != nil {
+		return acc
+	}
+	return nil
 }
 
 func (lc *LogicCore) isMyLot(lotID string) bool {
@@ -187,14 +197,14 @@ func (lc *LogicCore) ShowDashboard(node *Node, rendezvous string) {
 		}
 	}
 
-	dutyLotID, _ := lc.AmITheShooter(node)
+	shooterLotID, _ := lc.AmITheShooter(node)
 
 	for i, item := range items {
 		prefix := "  "
 		suffix := "   "
 		if lc.isMyLot(item.LotID) {
 			prefix = ">>"
-			if item.LotID == dutyLotID {
+			if item.LotID == shooterLotID {
 				suffix = " * "
 			}
 		}
@@ -369,7 +379,6 @@ func (lc *LogicCore) SelectRandomProxy(h host.Host, ctx context.Context) (peer.I
 	defer lc.ledger.mu.RUnlock()
 
 	var directCandidates []peer.ID
-	var transientCandidates []peer.ID
 
 	err := godotenv.Load()
 	if err != nil {
@@ -413,16 +422,11 @@ func (lc *LogicCore) SelectRandomProxy(h host.Host, ctx context.Context) (peer.I
 		}
 		if isDirectlyConnected {
 			directCandidates = append(directCandidates, pid)
-		} else {
-			transientCandidates = append(transientCandidates, pid)
 		}
 	}
 
 	if len(directCandidates) > 0 {
 		return directCandidates[rand.Intn(len(directCandidates))], "direct"
-	}
-	if len(transientCandidates) > 0 {
-		return transientCandidates[rand.Intn(len(transientCandidates))], "relay"
 	}
 	fmt.Println("[Brain] Прокси не найдено. Использую прямой запрос.")
 	return "", ""
@@ -441,7 +445,7 @@ func (lc *LogicCore) HandleMessage(ctx context.Context, node *Node, m NodeMessag
 	switch m.Type {
 	case "ANNOUNCE", "ROCKET":
 		pubKey, _ := PubKeyFromPeerID(m.PeerID)
-		needsCorrection := lc.ledger.Update(m.LotID, m.PeerID, pubKey, m.T, m.R, m.JoinedAt, m.LastTopTick, m.LastEpoch)
+		needsCorrection := lc.ledger.Update(m.LotID, m.PeerID, pubKey, m.T, m.R, m.JoinedAt, m.LastTopTick, m.LastEpoch, "")
 		if needsCorrection && m.Type == "ANNOUNCE" {
 			go lc.broadcastSyncCorrection(m, node)
 		}
@@ -516,6 +520,12 @@ func (lc *LogicCore) PerformExecution(ctx context.Context, node *Node, lotID str
 	lc.lastMyShotTime[lotID] = time.Now()
 	lc.mu.Unlock()
 
+	account := lc.findAccountByLotID(lotID)
+	if account == nil {
+		fmt.Printf("[Brain] Аккаунт для лота %s не найден\n", lotID)
+		return
+	}
+
 	wait := rand.Intn(1000) + 2000
 	fmt.Printf("[Brain] Враг обнаружен! Имитирую раздумья (%d сек)...\n", wait/1000)
 
@@ -528,7 +538,7 @@ func (lc *LogicCore) PerformExecution(ctx context.Context, node *Node, lotID str
 	proxyID, mode := lc.SelectRandomProxy(node.Host, ctx)
 
 	if proxyID == "" {
-		err := t2api.Rocket(t2api.SharedClient, lc.bearer, lc.number, lotID)
+		err := t2api.Rocket(t2api.SharedClient, account.Bearer, account.Number, lotID)
 		if err == nil {
 			lc.broadcastRocketFired(node, lotID)
 		} else {
@@ -542,7 +552,7 @@ func (lc *LogicCore) PerformExecution(ctx context.Context, node *Node, lotID str
 	var err error
 	for attempt := 1; attempt <= 2; attempt++ {
 		client := lc.CreateProxiedClient(ctx, node.Host, proxyID)
-		err = t2api.Rocket(client, lc.bearer, lc.number, lotID)
+		err = t2api.Rocket(client, account.Bearer, account.Number, lotID)
 
 		if err == nil {
 			break
@@ -552,7 +562,7 @@ func (lc *LogicCore) PerformExecution(ctx context.Context, node *Node, lotID str
 
 		if attempt == 2 || !isRateLimit {
 			fmt.Printf("[Brain] Прямой запрос...\n")
-			err = t2api.Rocket(t2api.SharedClient, lc.bearer, lc.number, lotID)
+			err = t2api.Rocket(t2api.SharedClient, account.Bearer, account.Number, lotID)
 			break
 		}
 

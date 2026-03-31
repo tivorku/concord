@@ -14,6 +14,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"google.golang.org/protobuf/proto"
 	pb "market-denet/pb"
+	"market-denet/t2api"
 )
 
 const (
@@ -53,9 +54,9 @@ func createTestNode(ctx context.Context, id int) (*TestNode, error) {
 	lotID := fmt.Sprintf("test-lot-%d", id)
 
 	now := time.Now().Unix() + NetworkTimeOffset
-	ledger.Update(lotID, h.ID(), priv.GetPublic(), 0, 0, now, 0, GetCurrentEpoch())
+	ledger.Update(lotID, h.ID(), priv.GetPublic(), 0, 0, now, 0, GetCurrentEpoch(), "test-acc")
 
-	lc := InitLogicCore(ledger, []string{lotID}, TestVolume, TestValue, priv, "mock", "123", nil)
+	lc := InitLogicCore(ledger, []string{lotID}, TestVolume, TestValue, priv, []*t2api.Account{}, nil)
 
 	params := pubsub.DefaultGossipSubParams()
 	params.HeartbeatInterval = 500 * time.Millisecond

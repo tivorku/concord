@@ -15,6 +15,120 @@ type LotInfo struct {
 	IsBot bool
 }
 
+type LotInfoDetailed struct {
+	ID       string
+	Name     string
+	Volume   int
+	Cost     int
+	IsActive bool
+}
+
+func GetAccountLots(bearer, number string) ([]LotInfoDetailed, error) {
+	url := fmt.Sprintf("https://%s/api/subscribers/7%s/exchange/lots/created", T2Host, number)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("Authorization", bearer)
+	req.Header.Set("Tele2-User-Agent", AppVersion)
+	req.Header.Set("X-API-Version", "2")
+	req.Header.Set("User-Agent", OkHttpVersion)
+
+	resp, err := SharedClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("Т2 вернул ошибку: %d", resp.StatusCode)
+	}
+
+	var res T2LotsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, fmt.Errorf("Ошибка парсинга JSON: %v", err)
+	}
+
+	var lots []LotInfoDetailed
+	for _, lot := range res.Data {
+		name := "Аноним"
+		if lot.Seller.Name != nil {
+			name = *lot.Seller.Name
+		}
+
+		t, err := time.Parse(time.RFC3339, lot.CreationDate)
+		if err != nil {
+			t, _ = time.Parse("2006-01-02T15:04:05Z", lot.CreationDate)
+		}
+
+		tooOld := time.Since(t).Hours() > 30*24
+
+		lots = append(lots, LotInfoDetailed{
+			ID:       lot.ID,
+			Name:     name,
+			Volume:   int(lot.Volume.Value),
+			Cost:     int(lot.Cost.Amount),
+			IsActive: lot.Status == "active" && !tooOld,
+		})
+	}
+
+	return lots, nil
+}
+
+func SelectAccountLots(account *Account) ([]string, error) {
+	lots, err := GetAccountLots(account.Bearer, account.Number)
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Printf("\n=== Аккаунт: %s (%s) ===\n", account.ID, account.Number)
+
+	var selectable []LotInfoDetailed
+	for _, lot := range lots {
+		if lot.IsActive {
+			selectable = append(selectable, lot)
+		}
+	}
+
+	if len(selectable) == 0 {
+		return nil, fmt.Errorf("Активные лоты не найдены для аккаунта %s", account.ID)
+	}
+
+	fmt.Printf("Всего лотов: %d\n", len(selectable))
+
+	for i, lot := range selectable {
+		fmt.Printf("%d. %-10s | %d ГБ | %d руб\n", i+1, lot.Name, lot.Volume, lot.Cost)
+	}
+
+	if len(selectable) > 5 {
+		fmt.Printf("[MDN] Ограничено до 5 лотов\n")
+		selectable = selectable[:5]
+	}
+
+	fmt.Print("\nВыберите номера лотов (через пробел, например: 1 2 3): ")
+	var choices string
+	fmt.Scanln(&choices)
+
+	var selected []int
+	for _, c := range strings.Fields(choices) {
+		var num int
+		fmt.Sscanf(c, "%d", &num)
+		selected = append(selected, num)
+	}
+
+	if len(selected) == 0 {
+		return nil, fmt.Errorf("Не выбран ни один лот.")
+	}
+
+	var lotIDs []string
+	for _, choice := range selected {
+		if choice < 1 || choice > len(selectable) {
+			continue
+		}
+		lotIDs = append(lotIDs, selectable[choice-1].ID)
+	}
+
+	fmt.Printf("[MDN] Выбрано лотов: %d\n", len(lotIDs))
+	return lotIDs, nil
+}
+
 type T2LotsResponse struct {
 	Data []struct {
 		ID     string `json:"id"`

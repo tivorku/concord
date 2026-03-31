@@ -1,0 +1,14 @@
+{
+  "accounts": [
+    {
+      "id": "acc1",
+      "number": "9778386195",
+      "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICI3OGM4YmEzYy0wZTQyLTQwY2ItYTFjMy1mNTZkYjgzOWY0NzIifQ.eyJpYXQiOjE3NzQ5NTI3NDMsImp0aSI6IjAxMDBmNDJkLWE5NmUtNDcxMi04YjY3LWY4ZDFjMWFjYWJiYyIsImlzcyI6Imh0dHBzOi8vc3NvLnQyLnJ1L2F1dGgvcmVhbG1zL3RlbGUyLWIyYyIsImF1ZCI6Imh0dHBzOi8vc3NvLnQyLnJ1L2F1dGgvcmVhbG1zL3RlbGUyLWIyYyIsInN1YiI6ImRkMTIyMTZlLTE2ZjAtNDU0ZC04ZjAxLTRjYjBmM2RkNjExZSIsInR5cCI6Ik9mZmxpbmUiLCJhenAiOiJhbmRyb2lkLWFwcCIsInNlc3Npb25fc3RhdGUiOiIzMWUxOTU5Yy00MGU4LTQ5NDUtOTdhOC1jNGQxY2E5ZmQ2ZTMiLCJzY29wZSI6InByb2ZpbGUgb2ZmbGluZV9hY2Nlc3MgZW1haWwgYXBpX2FjY2VzcyIsInNpZCI6IjMxZTE5NTljLTQwZTgtNDk0NS05N2E4LWM0ZDFjYTlmZDZlMyJ9.Bd8itCoLaOsI4ifzUUji7317oIR0ktRcIoV5xcz0HoQ",
+    },
+    {
+      "id": "acc2",
+      "number": "9012778773",
+      "refresh": "",
+    },
+  ]
+}

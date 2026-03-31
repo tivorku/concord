@@ -25,31 +25,40 @@ func main() {
 
 	myLedger := p2p.NewLedger()
 
-	bearer, number := t2api.Login()
-	/*myLotIDs, volume, value, err := t2api.SelectLots(bearer, number)
+	accounts, err := t2api.MultiLogin()
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}*/
-
-	// MOCKING myLotID FOR TESTING
-	LotBytes, err := os.ReadFile("lotid.txt")
-	if err != nil {
-		fmt.Printf("Failed to read lotid.txt: %v\n", err)
+		fmt.Printf("[Error] %v\n", err)
 		os.Exit(1)
 	}
-	lines := strings.Split(strings.TrimSpace(string(LotBytes)), "\n")
-	var myLotIDs []string
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			myLotIDs = append(myLotIDs, line)
+
+	type SelectedLot struct {
+		LotID     string
+		AccountID string
+	}
+	var myLots []SelectedLot
+
+	for _, acc := range accounts {
+		lotIDs, err := t2api.SelectAccountLots(acc)
+		if err != nil {
+			fmt.Printf("[Error] %v\n", err)
+			continue
+		}
+		for _, lotID := range lotIDs {
+			myLots = append(myLots, SelectedLot{LotID: lotID, AccountID: acc.ID})
+			myLedger.SetLotAccount(lotID, acc)
 		}
 	}
-	if len(myLotIDs) == 0 {
-		fmt.Println("No lot IDs found in lotid.txt")
+
+	if len(myLots) == 0 {
+		fmt.Println("Не выбран ни один лот")
 		os.Exit(1)
 	}
+
+	var myLotIDs []string
+	for _, lot := range myLots {
+		myLotIDs = append(myLotIDs, lot.LotID)
+	}
+
 	var (
 		volume int = 43
 		value  int = 645
@@ -70,17 +79,19 @@ func main() {
 	p2p.StartDiscovery(ctx, h, rendezvous)
 	go func() {
 		time.Sleep(200 * time.Millisecond)
-		for i, lotID := range myLotIDs {
-			if i > 0 {
+		lotIndex := 0
+		for _, lot := range myLots {
+			if lotIndex > 0 {
 				time.Sleep(10 * time.Second)
 			}
 			now := time.Now().Unix() + p2p.NetworkTimeOffset
-			myLedger.Update(lotID, h.ID(), p2p.PrivKeyToPubKey(privKey), 0, 0, now, 0, p2p.GetCurrentEpoch())
-			fmt.Printf("[MDN] Лот %d/%d зарегистрирован в %d\n", i+1, len(myLotIDs), now)
+			myLedger.Update(lot.LotID, h.ID(), p2p.PrivKeyToPubKey(privKey), 0, 0, now, 0, p2p.GetCurrentEpoch(), lot.AccountID)
+			fmt.Printf("[MDN] Лот %s (аккаунт: %s) зарегистрирован\n", lot.LotID, lot.AccountID)
+			lotIndex++
 		}
 	}()
 	go myLedger.StartJanitor(ctx, node)
-	core := p2p.InitLogicCore(myLedger, myLotIDs, volume, value, privKey, bearer, number, node)
+	core := p2p.InitLogicCore(myLedger, myLotIDs, volume, value, privKey, accounts, node)
 	node.RegisterProxyHandler()
 	node.Topic, _ = p2p.StartPubSub(ctx, h, rendezvous, myLedger, core)
 
