@@ -280,14 +280,14 @@ func (node *Node) RegisterProxyHandler() {
 		caller := stream.Conn().RemotePeer()
 
 		node.Ledger.mu.Lock()
-        _, exists := node.Ledger.Members[caller.String()]
-        node.Ledger.mu.Unlock()
+		_, exists := node.Ledger.Members[caller.String()]
+		node.Ledger.mu.Unlock()
 
-        if !exists {
-           fmt.Printf("[PROXY] Denied: %s not in ledger\n", caller)
-            stream.Reset()
-            return
-        }
+		if !exists {
+			fmt.Printf("[PROXY] Denied: %s not in ledger\n", caller)
+			stream.Reset()
+			return
+		}
 
 		node.proxyMu.Lock()
 		if time.Since(node.lastProxyTime) < 5*time.Second {
@@ -333,9 +333,9 @@ func (node *Node) RegisterProxyHandler() {
 	})
 }
 
-func GetProtocolID(volume, value int) string {
+func GetProtocolID(uom string, volume, value int) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "%d-%d", volume, value)
+	fmt.Fprintf(h, "%s-%d-%d", uom, volume, value)
 	res := h.Sum(nil)
 	return fmt.Sprintf("/mdn/v0.1/%x", res[len(res)-4:])
 }

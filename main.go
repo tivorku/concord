@@ -101,7 +101,7 @@ func main() {
 
 	node := &p2p.Node{Host: h, Ledger: myLedger, Ctx: ctx}
 
-	rendezvous := p2p.GetProtocolID(selectedSegment.Volume, selectedSegment.Cost)
+	rendezvous := p2p.GetProtocolID(selectedSegment.UOM, selectedSegment.Volume, selectedSegment.Cost)
 
 	p2p.StartDiscovery(ctx, h, rendezvous)
 	go func() {
