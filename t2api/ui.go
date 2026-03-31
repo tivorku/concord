@@ -4,10 +4,10 @@ import "fmt"
 
 func UOMDisplayName(uom string) string {
 	switch uom {
-	case "data":
-		return "Data"
-	case "voice":
-		return "Voice"
+	case "gb":
+		return "ГБ"
+	case "min":
+		return "минут(ы)"
 	case "sms":
 		return "SMS"
 	default:
@@ -33,7 +33,7 @@ func SelectSegment(segments []Segment) (Segment, error) {
 		for _, s := range segmentsByUOM[uom] {
 			count += s.Count
 		}
-		fmt.Printf("%d. %s  [%d лотов]\n", i, UOMDisplayName(uom), count)
+		fmt.Printf("%d. %s [%d лотов]\n", i, UOMDisplayName(uom), count)
 		uomList = append(uomList, uom)
 		i++
 	}
@@ -47,9 +47,9 @@ func SelectSegment(segments []Segment) (Segment, error) {
 	selectedUOM := uomList[choice-1]
 
 	selectedSegments := segmentsByUOM[selectedUOM]
-	fmt.Printf("\n=== %s сегменты ===\n", UOMDisplayName(selectedUOM))
+	fmt.Printf("\n=== Сегменты %s ===\n", UOMDisplayName(selectedUOM))
 	for j, seg := range selectedSegments {
-		fmt.Printf("%d. %d %s за %d руб  (%d лотов)\n", j+1, seg.Volume, seg.UOM, seg.Cost, seg.Count)
+		fmt.Printf("%d. %d %s за %d руб (%d лотов)\n", j+1, seg.Volume, UOMDisplayName(seg.UOM), seg.Cost, seg.Count)
 	}
 
 	fmt.Print("> ")
