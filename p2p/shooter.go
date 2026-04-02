@@ -86,7 +86,7 @@ func (s *Shooter) PerformExecution(ctx context.Context, topic *pubsub.Topic, nod
 		return
 	}
 
-	proxyID, mode := s.SelectRandomProxy(node.Host)
+	proxyID := s.SelectRandomProxy(node.Host)
 
 	if proxyID == "" {
 		err := t2api.Rocket(t2api.SharedClient, s.bearer, s.number, lotID)
@@ -98,7 +98,7 @@ func (s *Shooter) PerformExecution(ctx context.Context, topic *pubsub.Topic, nod
 		return
 	}
 
-	fmt.Printf("%s[Brain] Использую туннель через: %s (%s)%s\n", ColorRed, proxyID.String()[len(proxyID.String())-8:], mode, ColorReset)
+	fmt.Printf("%s[Brain] Использую туннель через: %s%s\n", ColorRed, proxyID.String()[len(proxyID.String())-8:], ColorReset)
 
 	var err error
 	for attempt := 1; attempt <= 2; attempt++ {
@@ -131,27 +131,26 @@ func (s *Shooter) PerformExecution(ctx context.Context, topic *pubsub.Topic, nod
 	}
 }
 
-func (s *Shooter) SelectRandomProxy(h host.Host) (peer.ID, string) {
+func (s *Shooter) SelectRandomProxy(h host.Host) peer.ID {
 	s.ledger.mu.RLock()
 	defer s.ledger.mu.RUnlock()
 
 	var directCandidates []peer.ID
-	var transientCandidates []peer.ID
 
 	sRelayAddr := os.Getenv("RELAY_ADDR")
 	if sRelayAddr == "" {
 		fmt.Println("[Brain] RELAY_ADDR не установлен.")
-		return "", ""
+		return ""
 	}
 	relayAddr, err := multiaddr.NewMultiaddr(sRelayAddr)
 	if err != nil {
 		fmt.Printf("[Brain] Неверный RELAY_ADDR: %v\n", err)
-		return "", ""
+		return ""
 	}
 	relayInfo, err := peer.AddrInfoFromP2pAddr(relayAddr)
 	if err != nil {
 		fmt.Printf("[Brain] Неверный адрес relay: %v\n", err)
-		return "", ""
+		return ""
 	}
 
 	for _, pid := range h.Network().Peers() {
@@ -186,19 +185,14 @@ func (s *Shooter) SelectRandomProxy(h host.Host) (peer.ID, string) {
 		}
 		if isDirectlyConnected {
 			directCandidates = append(directCandidates, pid)
-		} else {
-			transientCandidates = append(transientCandidates, pid)
 		}
 	}
 
 	if len(directCandidates) > 0 {
-		return directCandidates[rand.Intn(len(directCandidates))], "direct"
-	}
-	if len(transientCandidates) > 0 {
-		return transientCandidates[rand.Intn(len(transientCandidates))], "relay"
+		return directCandidates[rand.Intn(len(directCandidates))]
 	}
 	fmt.Println("[Brain] Прокси не найдено. Использую прямой запрос.")
-	return "", ""
+	return ""
 }
 
 func (s *Shooter) CreateProxiedClient(ctx context.Context, h host.Host, proxyPeerID peer.ID) *http.Client {
