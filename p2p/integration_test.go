@@ -19,7 +19,7 @@ import (
 const (
 	TestUOM       = "data"
 	TestVolume    = 10
-	TestValue     = 100
+	TestValue     = 150
 	TestTimeLimit = 20 * time.Second
 )
 
@@ -56,7 +56,8 @@ func createTestNode(ctx context.Context, id int) (*TestNode, error) {
 	now := time.Now().Unix() + NetworkTimeOffset
 	ledger.Update(lotID, h.ID(), priv.GetPublic(), 0, 0, now, 0, GetCurrentEpoch())
 
-	lc := InitLogicCore(ledger, []string{lotID}, TestVolume, TestValue, TestUOM, priv, "mock", "123", nil)
+	tempNode := &Node{Host: h}
+	lc := InitLogicCore(ledger, []string{lotID}, TestVolume, TestValue, TestUOM, priv, "mock", "123", tempNode)
 
 	params := pubsub.DefaultGossipSubParams()
 	params.HeartbeatInterval = 500 * time.Millisecond

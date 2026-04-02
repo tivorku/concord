@@ -23,7 +23,13 @@ type LogicCore struct {
 }
 
 func InitLogicCore(l *Ledger, myLotIDs []string, vol int, val int, uom string, privKey crypto.PrivKey, bearer, number string, node *Node) *LogicCore {
-	myID := node.Host.ID().String()
+	var myID string
+	if node != nil {
+		myID = node.Host.ID().String()
+	} else {
+		pid, _ := peer.IDFromPublicKey(privKey.GetPublic())
+		myID = pid.String()
+	}
 	shooter := NewShooter(bearer, number, myLotIDs, l)
 	broadcaster := NewBroadcaster(l, privKey, myID)
 	dashboard := NewDashboard(l, myLotIDs, vol, val)
