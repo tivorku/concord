@@ -56,7 +56,7 @@ func createTestNode(ctx context.Context, id int) (*TestNode, error) {
 	now := time.Now().Unix() + NetworkTimeOffset
 	ledger.Update(lotID, h.ID(), priv.GetPublic(), 0, 0, now, 0, GetCurrentEpoch())
 
-	lc := InitLogicCore(ledger, []string{lotID}, TestVolume, TestValue, priv, "mock", "123", nil)
+	lc := InitLogicCore(ledger, []string{lotID}, TestVolume, TestValue, TestUOM, priv, "mock", "123", nil)
 
 	params := pubsub.DefaultGossipSubParams()
 	params.HeartbeatInterval = 500 * time.Millisecond
