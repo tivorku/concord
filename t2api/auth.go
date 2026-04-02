@@ -23,11 +23,13 @@ func RequestSms(number string) string {
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		fmt.Println(err)
+		return ""
 	}
 
 	request, err := http.NewRequest("POST", smsURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		fmt.Println(err)
+		return ""
 	}
 	request.Header.Set("Content-Type", "application/json; charset=UTF-8")
 	setTele2Headers(request, "1")
@@ -35,11 +37,16 @@ func RequestSms(number string) string {
 	response, err := SharedClient.Do(request)
 	if err != nil {
 		fmt.Println(err)
+		return ""
 	}
+	if response == nil {
+		return ""
+	}
+	defer response.Body.Close()
+
 	if response.StatusCode != http.StatusOK {
 		fmt.Println(response.Status)
 	}
-	defer response.Body.Close()
 
 	var smsCode string
 	fmt.Print("Введите SMS-код: ")
@@ -56,24 +63,43 @@ func RequestBearer(number, smsCode string) (string, string) {
 	rawData.Set("password_type", "sms_code")
 
 	body := strings.NewReader(rawData.Encode())
-	request, _ := http.NewRequest("POST", bearerURL, body)
-	request.Header.Set("X-API-Version", "1")
-	request.Header.Set("Tele2-User-Agent", AppVersion)
-	request.Header.Set("User-Agent", OkHttpVersion)
+	request, err := http.NewRequest("POST", bearerURL, body)
+	if err != nil {
+		fmt.Println(err)
+		return "", ""
+	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	setTele2Headers(request, "1")
 
 	response, err := SharedClient.Do(request)
 	if err != nil {
 		fmt.Println(err)
+		return "", ""
 	}
-	if response.StatusCode != http.StatusOK {
-		fmt.Println(response.Status)
+	if response == nil {
+		return "", ""
 	}
 	defer response.Body.Close()
 
-	respBody, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusOK {
+		fmt.Println(response.Status)
+		return "", ""
+	}
+
+	respBody, err := io.ReadAll(response.Body)
+	if err != nil {
+		fmt.Println(err)
+		return "", ""
+	}
 	var data TokenData
-	json.Unmarshal(respBody, &data)
+	if err := json.Unmarshal(respBody, &data); err != nil {
+		fmt.Println(err)
+		return "", ""
+	}
+	if data.Access == "" {
+		fmt.Println("Пустой access_token в ответе")
+		return "", ""
+	}
 	return data.Refresh, data.Access
 }
 
@@ -84,22 +110,36 @@ func GetTokens(refresh string) (string, string, error) {
 	rawData.Set("refresh_token", refresh)
 
 	body := strings.NewReader(rawData.Encode())
-	request, _ := http.NewRequest("POST", bearerURL, body)
+	request, err := http.NewRequest("POST", bearerURL, body)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create request: %w", err)
+	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	setTele2Headers(request, "1")
 
 	response, err := SharedClient.Do(request)
 	if err != nil {
-		fmt.Println(err)
-		return "", "", err
+		return "", "", fmt.Errorf("request failed: %w", err)
 	}
-	if response.StatusCode != http.StatusOK {
-		fmt.Println(response.Status)
+	if response == nil {
+		return "", "", fmt.Errorf("nil response")
 	}
 	defer response.Body.Close()
 
-	respBody, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("token refresh failed: %s", response.Status)
+	}
+
+	respBody, err := io.ReadAll(response.Body)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to read response: %w", err)
+	}
 	var data TokenData
-	json.Unmarshal(respBody, &data)
+	if err := json.Unmarshal(respBody, &data); err != nil {
+		return "", "", fmt.Errorf("failed to parse token response: %w", err)
+	}
+	if data.Access == "" {
+		return "", "", fmt.Errorf("пустой access_token в ответе")
+	}
 	return data.Refresh, data.Access, nil
 }

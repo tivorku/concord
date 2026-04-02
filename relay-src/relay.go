@@ -3,31 +3,36 @@ package main
 import (
 	"context"
 	"encoding/hex"
-	"github.com/libp2p/go-libp2p"
-	dht "github.com/libp2p/go-libp2p-kad-dht"
-	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/peerstore"
-	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	"log"
+	"os"
 	"runtime"
 	"time"
 
-	"github.com/libp2p/go-libp2p/core/protocol"
-	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
-	connmgr "github.com/libp2p/go-libp2p/p2p/net/connmgr"
-
+	"github.com/joho/godotenv"
+	"github.com/libp2p/go-libp2p"
+	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/peerstore"
+	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/libp2p/go-libp2p/p2p/host/resource-manager"
+	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
+	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	manet "github.com/multiformats/go-multiaddr/net"
 )
-
-var password = "2a35442281f13052136c53589ae2f51b"
 
 func init() {
 	runtime.GOMAXPROCS(1)
 }
 func main() {
 	ctx := context.Background()
+
+	godotenv.Load()
+	password := os.Getenv("RELAY_PASSWORD")
+	if password == "" {
+		log.Fatal("RELAY_PASSWORD not set")
+	}
 
 	privKey, _ := loadKey()
 	wm := NewWhitelistManager("whitelist.json")

@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/joho/godotenv"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -32,6 +31,7 @@ type LogicCore struct {
 	myLotIDs       []string
 	volume         int
 	value          int
+	uom            string
 	privKey        crypto.PrivKey
 	mu             sync.Mutex
 	lastMyShotTime map[string]time.Time
@@ -41,12 +41,13 @@ type LogicCore struct {
 	number         string
 }
 
-func InitLogicCore(l *Ledger, myLotIDs []string, vol int, val int, privKey crypto.PrivKey, bearer, number string, node *Node) *LogicCore {
+func InitLogicCore(l *Ledger, myLotIDs []string, vol int, val int, uom string, privKey crypto.PrivKey, bearer, number string, node *Node) *LogicCore {
 	lc := &LogicCore{
 		ledger:         l,
 		myLotIDs:       myLotIDs,
 		volume:         vol,
 		value:          val,
+		uom:            uom,
 		privKey:        privKey,
 		lastMyShotTime: make(map[string]time.Time),
 		isExecuting:    false,
@@ -371,15 +372,21 @@ func (lc *LogicCore) SelectRandomProxy(h host.Host, ctx context.Context) (peer.I
 	var directCandidates []peer.ID
 	var transientCandidates []peer.ID
 
-	err := godotenv.Load()
-	if err != nil {
-		fmt.Println("Ошибка чтения .env файла!")
-		os.Exit(4)
-	}
-
 	s := os.Getenv("RELAY_ADDR")
-	relayAddr, _ := multiaddr.NewMultiaddr(s)
-	relayInfo, _ := peer.AddrInfoFromP2pAddr(relayAddr)
+	if s == "" {
+		fmt.Println("[Brain] RELAY_ADDR not set, using direct request.")
+		return "", ""
+	}
+	relayAddr, err := multiaddr.NewMultiaddr(s)
+	if err != nil {
+		fmt.Printf("[Brain] Invalid RELAY_ADDR: %v\n", err)
+		return "", ""
+	}
+	relayInfo, err := peer.AddrInfoFromP2pAddr(relayAddr)
+	if err != nil {
+		fmt.Printf("[Brain] Invalid relay address: %v\n", err)
+		return "", ""
+	}
 
 	for _, pid := range h.Network().Peers() {
 		if pid == h.ID() || pid.String() == relayInfo.ID.String() {
@@ -599,6 +606,16 @@ func (lc *LogicCore) dutyLoop(ctx context.Context, node *Node) {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
+	trafficType := lc.uom
+	switch lc.uom {
+	case "gb":
+		trafficType = "data"
+	case "min":
+		trafficType = "voice"
+	case "sms":
+		trafficType = "sms"
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -606,22 +623,24 @@ func (lc *LogicCore) dutyLoop(ctx context.Context, node *Node) {
 		case <-ticker.C:
 			isDuty := lc.checkDutyRole(1, node)
 			if isDuty {
-				t2api.GetTop4IDsAsync(lc.volume, lc.value, func(lots []t2api.LotInfo, err error) {
-					if err != nil {
-						fmt.Println(err)
+				ch := t2api.GetTop4IDsAsync(trafficType, lc.volume, lc.value)
+				go func() {
+					result := <-ch
+					if result.Err != nil {
+						fmt.Println(result.Err)
 						return
 					}
-					if len(lots) > 0 {
-						lc.broadcastTopStatus(node, lots[0])
+					if len(result.Lots) > 0 {
+						lc.broadcastTopStatus(node, result.Lots[0])
 						m := NodeMessage{
 							Type:   "TOP",
-							LotID:  lots[0].ID,
+							LotID:  result.Lots[0].ID,
 							PeerID: node.Host.ID(),
-							IsBot:  lots[0].IsBot,
+							IsBot:  result.Lots[0].IsBot,
 						}
 						lc.HandleMessage(ctx, node, m)
 					}
-				})
+				}()
 			}
 		}
 	}
@@ -640,6 +659,7 @@ func (lc *LogicCore) announceLoop(ctx context.Context, node *Node) {
 			lc.ledger.mu.Lock()
 
 			participants := lc.ledger.Members[node.Host.ID().String()]
+			var messages []*pb.NodeMessage
 			for _, me := range participants {
 				if currentEpoch > me.LastEpoch {
 					me.T /= 2
@@ -658,10 +678,14 @@ func (lc *LogicCore) announceLoop(ctx context.Context, node *Node) {
 					LastTopTick: me.LastTopTick,
 					LastEpoch:   me.LastEpoch,
 				}
-				lc.publish(node.Topic, msg)
+				messages = append(messages, msg)
 			}
 
 			lc.ledger.mu.Unlock()
+
+			for _, msg := range messages {
+				lc.publish(node.Topic, msg)
+			}
 		}
 	}
 }

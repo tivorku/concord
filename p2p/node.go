@@ -18,7 +18,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/joho/godotenv"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -77,17 +76,30 @@ type Node struct {
 func InitHost(ctx context.Context, privKey crypto.PrivKey) (host.Host, error) {
 	var h host.Host
 	var err error
-	err = godotenv.Load()
-	if err != nil {
-		fmt.Println("Ошибка чтения .env файла!")
-		os.Exit(3)
-	}
 	s := os.Getenv("RELAY_ADDR")
-	relayAddr, _ := multiaddr.NewMultiaddr(s)
-	relayInfo, _ := peer.AddrInfoFromP2pAddr(relayAddr)
-	relayIP, _ := manet.ToIP(relayAddr)
+	if s == "" {
+		return nil, fmt.Errorf("RELAY_ADDR not set")
+	}
+	relayAddr, err := multiaddr.NewMultiaddr(s)
+	if err != nil {
+		return nil, fmt.Errorf("invalid RELAY_ADDR: %w", err)
+	}
+	relayInfo, err := peer.AddrInfoFromP2pAddr(relayAddr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid relay address: %w", err)
+	}
+	relayIP, err := manet.ToIP(relayAddr)
+	if err != nil {
+		return nil, fmt.Errorf("cannot extract IP from relay address: %w", err)
+	}
 	sharedPass := os.Getenv("RELAY_PASSWORD")
-	myID, _ := peer.IDFromPrivateKey(privKey)
+	if sharedPass == "" {
+		return nil, fmt.Errorf("RELAY_PASSWORD not set")
+	}
+	myID, err := peer.IDFromPrivateKey(privKey)
+	if err != nil {
+		return nil, fmt.Errorf("cannot get peer ID from private key: %w", err)
+	}
 	myGater := &ClientGater{
 		relayID: relayInfo.ID,
 		relayIP: relayIP.String(),
@@ -124,14 +136,17 @@ func InitHost(ctx context.Context, privKey crypto.PrivKey) (host.Host, error) {
 	return h, err
 }
 func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
-	err := godotenv.Load()
-	if err != nil {
-		fmt.Println("Ошибка чтения .env файла!")
-		os.Exit(6)
-	}
 	s := os.Getenv("RELAY_ADDR")
-	relayAddr, _ := multiaddr.NewMultiaddr(s)
-	relayInfo, _ := peer.AddrInfoFromP2pAddr(relayAddr)
+	relayAddr, err := multiaddr.NewMultiaddr(s)
+	if err != nil {
+		fmt.Printf("[Error] Invalid RELAY_ADDR: %v\n", err)
+		return
+	}
+	relayInfo, err := peer.AddrInfoFromP2pAddr(relayAddr)
+	if err != nil {
+		fmt.Printf("[Error] Invalid relay address: %v\n", err)
+		return
+	}
 	go MaintainRelayConn(ctx, h, relayInfo)
 	go pingRelay(ctx, h, relayInfo.ID)
 	kad, err := dht.New(ctx, h, dht.Mode(dht.ModeClient), dht.BootstrapPeers(*relayInfo))
@@ -315,6 +330,15 @@ func (node *Node) RegisterProxyHandler() {
 		}
 		defer conn.Close()
 
+		if fp := t2api.GetCertFingerprint(); fp != "" {
+			if err := t2api.ValidateCert(conn, fp); err != nil {
+				fmt.Printf("[Proxy] Certificate validation failed: %v\n", err)
+				conn.Close()
+				stream.Reset()
+				return
+			}
+		}
+
 		errCh := make(chan error, 2)
 
 		go func() {
@@ -372,11 +396,23 @@ func KnockToRelay(relayIP string, myID peer.ID, pass string) {
 	t2 := time.Now()
 	rtt := t2.Sub(t1)
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("Failed to read relay response:", err)
+		os.Exit(7)
+	}
 	respBody := string(body)
 	parts := strings.Split(respBody, ":")
+	if len(parts) < 2 {
+		fmt.Printf("Invalid relay response: %s\n", respBody)
+		os.Exit(7)
+	}
 	if parts[0] == "OK" {
-		serverTime, _ := strconv.ParseInt(parts[1], 10, 64)
+		serverTime, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			fmt.Printf("Invalid relay timestamp: %v\n", err)
+			os.Exit(7)
+		}
 		actualNetworkNow := time.Unix(serverTime, 0).Add(rtt / 2)
 		NetworkTimeOffset = actualNetworkNow.Unix() - t2.Unix()
 	} else {

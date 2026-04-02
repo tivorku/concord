@@ -17,6 +17,34 @@ var (
 	certFingerprint string
 )
 
+func GetCertFingerprint() string {
+	return certFingerprint
+}
+
+func ValidateCert(conn net.Conn, expectedFingerprint string) error {
+	tlsConn := tls.Client(conn, &tls.Config{
+		ServerName: T2Host,
+	})
+	if err := tlsConn.Handshake(); err != nil {
+		tlsConn.Close()
+		return fmt.Errorf("TLS handshake failed: %w", err)
+	}
+	defer tlsConn.Close()
+
+	certs := tlsConn.ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return fmt.Errorf("no certificates received")
+	}
+
+	fp := sha256.Sum256(certs[0].Raw)
+	fingerprint := hex.EncodeToString(fp[:8])
+	if fingerprint != expectedFingerprint {
+		return fmt.Errorf("certificate mismatch: expected %s, got %s", expectedFingerprint, fingerprint)
+	}
+
+	return nil
+}
+
 const (
 	AppVersion    = "mytele2-app/6.35.0"
 	OkHttpVersion = "okhttp/4.12.0"

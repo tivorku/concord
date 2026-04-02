@@ -20,7 +20,10 @@ type lotData struct {
 
 func fetchAccountLots(bearer, number string) ([]lotData, error) {
 	url := fmt.Sprintf("https://%s/api/subscribers/7%s/exchange/lots/created", T2Host, number)
-	req, _ := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
 	req.Header.Set("Authorization", bearer)
 	setTele2Headers(req, "2")
 
@@ -123,12 +126,17 @@ func FilterLotsBySegment(lots []lotData, seg Segment) []string {
 	return lotIDs
 }
 
-func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
-	url := fmt.Sprintf("https://%s/api/exchange/lots?trafficType=data&volume=%d&cost=%d&limit=4", T2Host, volume, cost)
+type GetTop4Result struct {
+	Lots []LotInfo
+	Err  error
+}
+
+func GetTop4IDs(trafficType string, volume, cost int) ([]LotInfo, error) {
+	url := fmt.Sprintf("https://%s/api/exchange/lots?trafficType=%s&volume=%d&cost=%d&limit=4", T2Host, trafficType, volume, cost)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Accept", "application/json")
@@ -160,8 +168,12 @@ func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
 		} `json:"data"`
 	}
 
+	preview := body
+	if len(preview) > 50 {
+		preview = preview[:50]
+	}
 	if err := json.Unmarshal(body, &res); err != nil {
-		return nil, fmt.Errorf("Ошибка декодирования JSON: %v. Тело: %s", err, string(body[:50]))
+		return nil, fmt.Errorf("Ошибка декодирования JSON: %v. Тело: %s", err, string(preview))
 	}
 
 	if len(res.Data) == 0 {
@@ -175,17 +187,27 @@ func GetTop4IDs(volume, cost int) ([]LotInfo, error) {
 	return results, nil
 }
 
-func GetTop4IDsAsync(volume, cost int, callback func([]LotInfo, error)) {
+func GetTop4IDsAsync(trafficType string, volume, cost int) <-chan GetTop4Result {
+	ch := make(chan GetTop4Result, 1)
 	go func() {
-		lots, err := GetTop4IDs(volume, cost)
-		callback(lots, err)
+		lots, err := GetTop4IDs(trafficType, volume, cost)
+		ch <- GetTop4Result{Lots: lots, Err: err}
 	}()
+	return ch
 }
 
 func Rocket(client *http.Client, bearer, number, lotID string) error {
 	url := fmt.Sprintf("https://%s/api/subscribers/7%s/exchange/lots/premium", T2Host, number)
-	jsonData := []byte(fmt.Sprintf(`{"lotId":"%s"}`, lotID))
-	req, _ := http.NewRequest("PUT", url, bytes.NewBuffer(jsonData))
+	jsonData, err := json.Marshal(struct {
+		LotID string `json:"lotId"`
+	}{LotID: lotID})
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON: %w", err)
+	}
+	req, err := http.NewRequest("PUT", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
 	req.Header.Set("Authorization", bearer)
 	req.Header.Set("Content-Type", "application/json")
 	setTele2Headers(req, "2")

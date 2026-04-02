@@ -35,7 +35,7 @@ func NewLedger() *Ledger {
 }
 
 func (p *Participant) TrustScore() float64 {
-	intervals := float64(time.Now().Unix()-p.JoinedAt) / (20 * 60.0)
+	intervals := float64((time.Now().Unix()+NetworkTimeOffset)-p.JoinedAt) / (20 * 60.0)
 	if intervals < 0 {
 		return 0
 	}

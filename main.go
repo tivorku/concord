@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 var (
@@ -24,6 +26,8 @@ func main() {
 	flag.Parse()
 
 	hideAndroidRestrictedNetworkError()
+
+	godotenv.Load()
 
 	if err := t2api.FetchCertificateFingerprint(); err != nil {
 		fmt.Printf("[SECURITY] Failed to fetch T2 certificate: %v\n", err)
@@ -110,7 +114,7 @@ func main() {
 		}
 	}()
 	go myLedger.StartJanitor(ctx, node)
-	core := p2p.InitLogicCore(myLedger, myLotIDs, volume, value, privKey, bearer, number, node)
+	core := p2p.InitLogicCore(myLedger, myLotIDs, volume, value, uom, privKey, bearer, number, node)
 	node.RegisterProxyHandler()
 	node.Topic, _ = p2p.StartPubSub(ctx, h, rendezvous, myLedger, core)
 
