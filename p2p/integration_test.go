@@ -19,7 +19,7 @@ import (
 
 const (
 	TestVolume    = 10
-	TestValue     = 100
+	TestValue     = 150
 	TestTimeLimit = 20 * time.Second
 )
 

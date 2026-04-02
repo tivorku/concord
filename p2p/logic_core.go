@@ -670,7 +670,6 @@ func (lc *LogicCore) announceLoop(ctx context.Context, node *Node) {
 				}
 				lc.publish(node.Topic, msg)
 			}
-
 			lc.ledger.mu.Unlock()
 		}
 	}
