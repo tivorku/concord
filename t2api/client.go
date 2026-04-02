@@ -27,7 +27,7 @@ func ValidateCert(conn net.Conn, expectedFingerprint string) error {
 	})
 	if err := tlsConn.Handshake(); err != nil {
 		tlsConn.Close()
-		return fmt.Errorf("TLS handshake failed: %w", err)
+		return fmt.Errorf("ошибка TLS handshake: %w", err)
 	}
 	defer tlsConn.Close()
 

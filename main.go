@@ -46,7 +46,7 @@ func main() {
 	if *useMock {
 		LotBytes, err := os.ReadFile("lotid.txt")
 		if err != nil {
-			fmt.Printf("Failed to read lotid.txt: %v\n", err)
+			fmt.Printf("Не удалось прочитать lotid.txt: %v\n", err)
 			os.Exit(1)
 		}
 		lines := strings.Split(strings.TrimSpace(string(LotBytes)), "\n")
@@ -57,7 +57,7 @@ func main() {
 			}
 		}
 		if len(myLotIDs) == 0 {
-			fmt.Println("No lot IDs found in lotid.txt")
+			fmt.Println("Не найдено ни одного ID лота в lotid.txt")
 			os.Exit(1)
 		}
 		uom = *mockUOM

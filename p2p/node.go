@@ -78,27 +78,27 @@ func InitHost(ctx context.Context, privKey crypto.PrivKey) (host.Host, error) {
 	var err error
 	s := os.Getenv("RELAY_ADDR")
 	if s == "" {
-		return nil, fmt.Errorf("RELAY_ADDR not set")
+		return nil, fmt.Errorf("RELAY_ADDR не установлен")
 	}
 	relayAddr, err := multiaddr.NewMultiaddr(s)
 	if err != nil {
-		return nil, fmt.Errorf("invalid RELAY_ADDR: %w", err)
+		return nil, fmt.Errorf("неверный RELAY_ADDR: %w", err)
 	}
 	relayInfo, err := peer.AddrInfoFromP2pAddr(relayAddr)
 	if err != nil {
-		return nil, fmt.Errorf("invalid relay address: %w", err)
+		return nil, fmt.Errorf("неверный адрес relay: %w", err)
 	}
 	relayIP, err := manet.ToIP(relayAddr)
 	if err != nil {
-		return nil, fmt.Errorf("cannot extract IP from relay address: %w", err)
+		return nil, fmt.Errorf("не удалось извлечь IP из адреса relay: %w", err)
 	}
 	sharedPass := os.Getenv("RELAY_PASSWORD")
 	if sharedPass == "" {
-		return nil, fmt.Errorf("RELAY_PASSWORD not set")
+		return nil, fmt.Errorf("RELAY_PASSWORD не установлен")
 	}
 	myID, err := peer.IDFromPrivateKey(privKey)
 	if err != nil {
-		return nil, fmt.Errorf("cannot get peer ID from private key: %w", err)
+		return nil, fmt.Errorf("не удалось получить peer ID из приватного ключа: %w", err)
 	}
 	myGater := &ClientGater{
 		relayID: relayInfo.ID,
@@ -139,12 +139,12 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
 	s := os.Getenv("RELAY_ADDR")
 	relayAddr, err := multiaddr.NewMultiaddr(s)
 	if err != nil {
-		fmt.Printf("[Error] Invalid RELAY_ADDR: %v\n", err)
+		fmt.Printf("[Error] Неверный RELAY_ADDR: %v\n", err)
 		return
 	}
 	relayInfo, err := peer.AddrInfoFromP2pAddr(relayAddr)
 	if err != nil {
-		fmt.Printf("[Error] Invalid relay address: %v\n", err)
+		fmt.Printf("[Error] Неверный адрес relay: %v\n", err)
 		return
 	}
 	go MaintainRelayConn(ctx, h, relayInfo)
@@ -373,13 +373,13 @@ func KnockToRelay(relayIP string, myID peer.ID, pass string) {
 	}
 	jsonBytes, err := json.Marshal(jsonData)
 	if err != nil {
-		fmt.Println("Failed to marshal request:", err)
+		fmt.Println("Не удалось подготовить запрос:", err)
 		os.Exit(7)
 	}
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBytes))
 	if err != nil {
-		fmt.Println("Failed to create request:", err)
+		fmt.Println("Не удалось создать запрос:", err)
 		os.Exit(7)
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -388,7 +388,7 @@ func KnockToRelay(relayIP string, myID peer.ID, pass string) {
 	t1 := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Println("Failed to connect to relay:", err)
+		fmt.Println("Не удалось подключиться к relay:", err)
 		os.Exit(7)
 	}
 	defer resp.Body.Close()
@@ -398,19 +398,19 @@ func KnockToRelay(relayIP string, myID peer.ID, pass string) {
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println("Failed to read relay response:", err)
+		fmt.Println("Не удалось прочитать ответ relay:", err)
 		os.Exit(7)
 	}
 	respBody := string(body)
 	parts := strings.Split(respBody, ":")
 	if len(parts) < 2 {
-		fmt.Printf("Invalid relay response: %s\n", respBody)
+		fmt.Printf("Неверный ответ relay: %s\n", respBody)
 		os.Exit(7)
 	}
 	if parts[0] == "OK" {
 		serverTime, err := strconv.ParseInt(parts[1], 10, 64)
 		if err != nil {
-			fmt.Printf("Invalid relay timestamp: %v\n", err)
+			fmt.Printf("Неверная метка времени relay: %v\n", err)
 			os.Exit(7)
 		}
 		actualNetworkNow := time.Unix(serverTime, 0).Add(rtt / 2)
