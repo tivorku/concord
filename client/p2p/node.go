@@ -319,7 +319,7 @@ func (node *Node) RegisterProxyHandler() {
 		node.lastProxyTime = time.Now()
 		node.proxyMu.Unlock()
 
-		fmt.Printf("%s[PROXY] Tunnel from %s to T2...%s\n", ColorRed, caller, ColorReset)
+		fmt.Printf("%s[PROXY] Tunnel from %s to T2...%s\n", ColorRed, caller[len(caller)-8:], ColorReset)
 		defer stream.Close()
 
 		conn, err := net.DialTimeout("tcp", t2api.T2FullHost, 10*time.Second)
