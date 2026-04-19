@@ -20,12 +20,13 @@ func VerifySignature(pubKey crypto.PubKey, msg *pb.NodeMessage, signature []byte
 }
 
 func serializeForSigning(msg *pb.NodeMessage) []byte {
-	data := fmt.Sprintf("%s|%s|%s|%d|%d|%d|%d|%d|%t",
+	data := fmt.Sprintf("%s|%s|%s|%d|%d|%d|%d|%d|%d|%t",
 		msg.Type,
 		msg.LotId,
 		msg.PeerId,
 		msg.T,
-		msg.R,
+		msg.ActiveOps,
+		msg.NetOps,
 		msg.JoinedAt,
 		msg.LastEpoch,
 		msg.LastTopTick,

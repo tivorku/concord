@@ -16,7 +16,7 @@ const configFile = "creds.json"
 var (
 	yesReset = map[string]bool{"yes": true, "ye": true, "y": true}
 	noReset  = map[string]bool{"": true, "no": true, "n": true}
-	yes记住    = map[string]bool{"": true, "yes": true, "ye": true, "y": true}
+	yes      = map[string]bool{"": true, "yes": true, "ye": true, "y": true}
 )
 
 func loadConfig() Config {
@@ -52,6 +52,7 @@ func Login() (string, string) {
 		var newRefresh string
 		newRefresh, access, err = GetTokens(cfg.Refresh)
 		if err != nil {
+		    fmt.Println(err)
 			os.Exit(5)
 		}
 
@@ -101,8 +102,8 @@ func GetNumber(cfg *Config) string {
 	}
 	fmt.Print("Запомнить номер телефона? (Y/n): ")
 	fmt.Scanln(&rememberNumber)
-
-	if yes记住[rememberNumber] {
+	
+	if yes[rememberNumber] {
 		cfg.Number = number
 		saveConfig(*cfg)
 	}

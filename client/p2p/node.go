@@ -57,7 +57,8 @@ type NodeMessage struct {
 	LotID       string  `json:"lot_id"`
 	PeerID      peer.ID `json:"peer_id"`
 	T           int64   `json:"t"` // тики
-	R           int64   `json:"r"` // ракеты
+	ActiveOps   int64   `json:"active_ops"`
+	NetOps      int64   `json:"net_ops"`
 	JoinedAt    int64   `json:"joined_at"`
 	LastEpoch   int64   `json:"last_epoch"`
 	LastTopTick int64   `json:"last_top_tick"`
@@ -171,7 +172,7 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
 			util.Advertise(ctx, localRouting, rendezvous)
 		}
 	}()
-	/*go func() {
+    go func() {
 		time.Sleep(1 * time.Second)
 		for {
 			fmt.Println("\n[Debug] Текущие адреса:")
@@ -186,7 +187,7 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
 			fmt.Println("[Debug] Разница во времени:", NetworkTimeOffset)
 			time.Sleep(3 * time.Second)
 		}
-	}()*/
+	}()
 	go func() {
 		for {
 			peersChan, err := localRouting.FindPeers(ctx, rendezvous)
@@ -264,7 +265,6 @@ func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, 
 				LotID:       pm.LotId,
 				PeerID:      pID,
 				T:           pm.T,
-				R:           pm.R,
 				JoinedAt:    pm.JoinedAt,
 				LastEpoch:   pm.LastEpoch,
 				LastTopTick: pm.LastTopTick,
@@ -450,7 +450,7 @@ func MaintainRelayConn(ctx context.Context, h host.Host, relayInfo *peer.AddrInf
 			return
 		case <-ticker.C:
 			if h.Network().Connectedness(relayInfo.ID) != network.Connected {
-				// мы оффлайн - реконнект
+				// сбрасываем кулдаун перед попыткой переподключения
 				if s, ok := h.Network().(*swarm.Swarm); ok {
 					s.Backoff().Clear(relayInfo.ID)
 				}

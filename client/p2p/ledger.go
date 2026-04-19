@@ -16,10 +16,12 @@ type Participant struct {
 	PeerID      peer.ID
 	PubKey      crypto.PubKey
 	T           int64
-	R           int64
+	ActiveOps   int64
+	NetOps      int64
 	LastTopTick int64
 	LastEpoch   int64
 	JoinedAt    int64
+	OpsCooldown time.Time
 	LastSeen    time.Time
 }
 
@@ -35,7 +37,7 @@ func NewLedger() *Ledger {
 }
 
 func (p *Participant) TrustScore() float64 {
-	intervals := float64((time.Now().Unix()+NetworkTimeOffset)-p.JoinedAt) / (20 * 60.0)
+	intervals := float64((time.Now().Unix())-p.JoinedAt) / (20 * 60.0)
 	if intervals < 0 {
 		return 0
 	}
@@ -55,7 +57,7 @@ func (l *Ledger) IsLotKnown(lotID string) bool {
 	return false
 }
 
-func (l *Ledger) Update(lotID string, pID peer.ID, pubKey crypto.PubKey, incomingT int64, incomingR int64, joinedAt int64, lastTopTick int64, incomingEpoch int64) bool {
+func (l *Ledger) Update(lotID string, pID peer.ID, pubKey crypto.PubKey, incomingT int64, joinedAt int64, lastTopTick int64, incomingEpoch int64, incomingActiveOps int64, incomingNetOps int64) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -84,39 +86,49 @@ func (l *Ledger) Update(lotID string, pID peer.ID, pubKey crypto.PubKey, incomin
 			PeerID:      pID,
 			PubKey:      pubKey,
 			T:           incomingT,
-			R:           incomingR,
+			ActiveOps:   incomingActiveOps,
+			NetOps:      incomingNetOps,
 			LastTopTick: lastTopTick,
 			JoinedAt:    joinedAt,
 			LastSeen:    time.Now(),
+			OpsCooldown: time.Now(),
 			LastEpoch:   incomingEpoch,
 		})
 		return false
 	}
-
+    
+    if incomingNetOps - incomingActiveOps > 0 {
+       // TODO: Банить неугодных
+    }
+    
 	// Существующий лот — проверки
 	if incomingEpoch < p.LastEpoch {
 		fmt.Println("Отклоняю сообщение из прошлой эпохи.")
 		return false
 	}
 	if p.LastEpoch == incomingEpoch {
-		if incomingT < p.T || incomingR < p.R {
+		if incomingT < p.T || incomingNetOps > p.NetOps || incomingActiveOps > p.ActiveOps {
 			fmt.Println("Шлю коррекционный пакет на сообщение из этой эпохи с уменьшенными параметрами.")
 			return true
 		}
 	} else if incomingEpoch > p.LastEpoch {
 		wasOnline := time.Since(p.LastSeen) < 20*time.Second
 		if wasOnline {
-			if incomingT < (p.T/2) || incomingR < (p.R/2) {
+			if incomingT < (p.T/2) {
 				fmt.Println("Шлю коррекционный пакет. Новые значения меньше, чем должны быть после слайдинга.")
 				return true
 			}
 		} else {
-			if incomingT < p.T || incomingR < p.R {
+			if incomingT < p.T {
 				fmt.Println("Шлю коррекционный пакет. Этой ноды не было онлайн, так что ей нельзя слайдиться.")
 				return true
 			}
 		}
 	}
+
+    p.ActiveOps = incomingActiveOps
+    p.NetOps = incomingNetOps
+    
 	if joinedAt > p.JoinedAt {
 		p.JoinedAt = joinedAt
 	}
@@ -134,30 +146,21 @@ func (l *Ledger) Update(lotID string, pID peer.ID, pubKey crypto.PubKey, incomin
 		p.T = incomingT
 	}
 
-	if incomingR > p.R {
-		diff := incomingR - p.R
-		if diff > 1 {
-			diff = 1
-		}
-		p.R = p.R + diff
-	} else {
-		p.R = incomingR
-	}
-
 	p.LastEpoch = incomingEpoch
 	p.LastSeen = time.Now()
 	return false
 }
 
 type Item struct {
-	LotID    string
-	Priority float64
-	PeerID   string
-	JoinedAt int64
-	WaitTime int64
-	T        int64
-	R        int64
-	Trust    float64
+	LotID     string
+	Priority  float64
+	PeerID    string
+	JoinedAt  int64
+	WaitTime  int64
+	T         int64
+	Trust     float64
+	ActiveOps int64
+	NetOps    int64
 }
 
 func GetCurrentEpoch() int64 {
@@ -180,28 +183,30 @@ func (l *Ledger) GetQueueWithMetrics(node *Node) []Item {
 
 			waitTime := p.LastTopTick
 			if waitTime == 0 {
-				waitTime = p.JoinedAt
+				waitTime = p.JoinedAt + NetworkTimeOffset
 			}
 			waitTime = now - waitTime
 			if waitTime < 1 {
 				waitTime = 1
 			}
 
-			satiety := float64(p.T) + float64(p.R)*5
+            spent_rockets := 5 - p.NetOps
+			satiety := float64(p.T) + float64(spent_rockets)*5
 			if satiety == 0 {
 				satiety = 1
 			}
-			priority := (satiety * satiety * 0.05) / (float64(waitTime) + 20.0)
+			priority := (satiety * satiety * 0.05) / (float64(waitTime))
 
 			items = append(items, Item{
-				LotID:    p.LotID,
-				Priority: priority,
-				PeerID:   p.PeerID.String(),
-				JoinedAt: p.JoinedAt,
-				WaitTime: waitTime,
-				T:        p.T,
-				R:        p.R,
-				Trust:    p.TrustScore(),
+				LotID:     p.LotID,
+				Priority:  priority,
+				PeerID:    p.PeerID.String(),
+				JoinedAt:  p.JoinedAt,
+				WaitTime:  waitTime,
+				T:         p.T,
+				Trust:     p.TrustScore(),
+				ActiveOps: p.ActiveOps,
+				NetOps:    p.NetOps,
 			})
 		}
 	}

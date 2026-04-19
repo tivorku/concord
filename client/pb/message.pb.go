@@ -27,12 +27,13 @@ type NodeMessage struct {
 	LotId         string                 `protobuf:"bytes,2,opt,name=lot_id,json=lotId,proto3" json:"lot_id,omitempty"`
 	PeerId        string                 `protobuf:"bytes,3,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
 	T             int64                  `protobuf:"varint,4,opt,name=t,proto3" json:"t,omitempty"`
-	R             int64                  `protobuf:"varint,5,opt,name=r,proto3" json:"r,omitempty"`
-	JoinedAt      int64                  `protobuf:"varint,6,opt,name=joined_at,json=joinedAt,proto3" json:"joined_at,omitempty"`
-	LastEpoch     int64                  `protobuf:"varint,7,opt,name=last_epoch,json=lastEpoch,proto3" json:"last_epoch,omitempty"`
-	LastTopTick   int64                  `protobuf:"varint,8,opt,name=last_top_tick,json=lastTopTick,proto3" json:"last_top_tick,omitempty"`
-	IsBot         bool                   `protobuf:"varint,9,opt,name=is_bot,json=isBot,proto3" json:"is_bot,omitempty"`
-	Signature     []byte                 `protobuf:"bytes,10,opt,name=signature,proto3" json:"signature,omitempty"`
+	JoinedAt      int64                  `protobuf:"varint,5,opt,name=joined_at,json=joinedAt,proto3" json:"joined_at,omitempty"`
+	LastEpoch     int64                  `protobuf:"varint,6,opt,name=last_epoch,json=lastEpoch,proto3" json:"last_epoch,omitempty"`
+	LastTopTick   int64                  `protobuf:"varint,7,opt,name=last_top_tick,json=lastTopTick,proto3" json:"last_top_tick,omitempty"`
+	IsBot         bool                   `protobuf:"varint,8,opt,name=is_bot,json=isBot,proto3" json:"is_bot,omitempty"`
+	Signature     []byte                 `protobuf:"bytes,9,opt,name=signature,proto3" json:"signature,omitempty"`
+	ActiveOps     int64                  `protobuf:"varint,10,opt,name=active_ops,json=activeOps,proto3" json:"active_ops,omitempty"`
+	NetOps        int64                  `protobuf:"varint,11,opt,name=net_ops,json=netOps,proto3" json:"net_ops,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -95,13 +96,6 @@ func (x *NodeMessage) GetT() int64 {
 	return 0
 }
 
-func (x *NodeMessage) GetR() int64 {
-	if x != nil {
-		return x.R
-	}
-	return 0
-}
-
 func (x *NodeMessage) GetJoinedAt() int64 {
 	if x != nil {
 		return x.JoinedAt
@@ -137,24 +131,40 @@ func (x *NodeMessage) GetSignature() []byte {
 	return nil
 }
 
+func (x *NodeMessage) GetActiveOps() int64 {
+	if x != nil {
+		return x.ActiveOps
+	}
+	return 0
+}
+
+func (x *NodeMessage) GetNetOps() int64 {
+	if x != nil {
+		return x.NetOps
+	}
+	return 0
+}
+
 var File_message_proto protoreflect.FileDescriptor
 
 const file_message_proto_rawDesc = "" +
 	"\n" +
-	"\rmessage.proto\x12\amessage\"\x82\x02\n" +
+	"\rmessage.proto\x12\amessage\"\xac\x02\n" +
 	"\vNodeMessage\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x15\n" +
 	"\x06lot_id\x18\x02 \x01(\tR\x05lotId\x12\x17\n" +
 	"\apeer_id\x18\x03 \x01(\tR\x06peerId\x12\f\n" +
-	"\x01t\x18\x04 \x01(\x03R\x01t\x12\f\n" +
-	"\x01r\x18\x05 \x01(\x03R\x01r\x12\x1b\n" +
-	"\tjoined_at\x18\x06 \x01(\x03R\bjoinedAt\x12\x1d\n" +
+	"\x01t\x18\x04 \x01(\x03R\x01t\x12\x1b\n" +
+	"\tjoined_at\x18\x05 \x01(\x03R\bjoinedAt\x12\x1d\n" +
 	"\n" +
-	"last_epoch\x18\a \x01(\x03R\tlastEpoch\x12\"\n" +
-	"\rlast_top_tick\x18\b \x01(\x03R\vlastTopTick\x12\x15\n" +
-	"\x06is_bot\x18\t \x01(\bR\x05isBot\x12\x1c\n" +
-	"\tsignature\x18\n" +
-	" \x01(\fR\tsignatureB\x06Z\x04./pbb\x06proto3"
+	"last_epoch\x18\x06 \x01(\x03R\tlastEpoch\x12\"\n" +
+	"\rlast_top_tick\x18\a \x01(\x03R\vlastTopTick\x12\x15\n" +
+	"\x06is_bot\x18\b \x01(\bR\x05isBot\x12\x1c\n" +
+	"\tsignature\x18\t \x01(\fR\tsignature\x12\x1d\n" +
+	"\n" +
+	"active_ops\x18\n" +
+	" \x01(\x03R\tactiveOps\x12\x17\n" +
+	"\anet_ops\x18\v \x01(\x03R\x06netOpsB\x06Z\x04./pbb\x06proto3"
 
 var (
 	file_message_proto_rawDescOnce sync.Once

@@ -110,14 +110,13 @@ func (s *Shooter) PerformExecution(ctx context.Context, topic *pubsub.Topic, nod
 		}
 
 		isRateLimit := strings.Contains(err.Error(), "429")
-
 		if attempt == 2 || !isRateLimit {
 			fmt.Printf("[Brain] Прямой запрос...\n")
 			err = t2api.Rocket(t2api.SharedClient, s.bearer, s.number, lotID)
 			break
 		}
 
-		fmt.Printf("[Brain] Прокси рейтлимит. Жду 3 сек...\n")
+		fmt.Printf("[Brain] Прокси рейт-лимит. Жду 3 сек...\n")
 		select {
 		case <-time.After(3 * time.Second):
 		case <-ctx.Done():

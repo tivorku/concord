@@ -17,7 +17,7 @@ import (
 
 var (
 	useMock   = flag.Bool("mock", false, "Use lotid.txt mock instead of segment selection")
-	mockUOM   = flag.String("uom", "data", "UOM for mock mode (data, voice, sms)")
+	mockUOM   = flag.String("uom", "gb", "UOM for mock mode (gb, min, sms)")
 	mockVol   = flag.Int("volume", 1, "Volume for mock mode")
 	mockValue = flag.Int("value", 15, "Value/cost for mock mode")
 )
@@ -42,6 +42,7 @@ func main() {
 	var myLotIDs []string
 	var uom string
 	var volume, value int
+	var lots []t2api.LotData
 	bearer, number := t2api.Login()
 	if *useMock {
 		LotBytes, err := os.ReadFile("lotid.txt")
@@ -65,7 +66,9 @@ func main() {
 		value = *mockValue
 		fmt.Printf("[MDN] Mock mode: %d lots, %s, %d ГБ, %d руб\n", len(myLotIDs), uom, volume, value)
 	} else {
-		segments, lots, err := t2api.GetSegments(bearer, number)
+	    var err error
+	    var segments []t2api.Segment
+		segments, lots, err = t2api.GetSegments(bearer, number)
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
@@ -102,14 +105,22 @@ func main() {
 	rendezvous := p2p.GetProtocolID(uom, volume, value)
 
 	p2p.StartDiscovery(ctx, h, rendezvous)
-	go func() {
+    go func() {
 		time.Sleep(200 * time.Millisecond)
 		for i, lotID := range myLotIDs {
-			if i > 0 {
-				time.Sleep(10 * time.Second)
-			}
+    		if i > 0 {
+        		time.Sleep(10 * time.Second)
+        	}
 			now := time.Now().Unix() + p2p.NetworkTimeOffset
-			myLedger.Update(lotID, h.ID(), p2p.PrivKeyToPubKey(privKey), 0, 0, now, 0, p2p.GetCurrentEpoch())
+			if *useMock {
+			    myLedger.Update(lotID, h.ID(), p2p.PrivKeyToPubKey(privKey), 0, now, 0, p2p.GetCurrentEpoch(), 5, 5)
+			} else {
+			    for _, lot := range lots {
+			        if lot.ID == lotID {
+    			        myLedger.Update(lotID, h.ID(), p2p.PrivKeyToPubKey(privKey), 0, now, 0, p2p.GetCurrentEpoch(), lot.PremiumOps, lot.PremiumOps)
+			        }
+			    }
+			}
 			fmt.Printf("[MDN] Лот %d/%d зарегистрирован в %d\n", i+1, len(myLotIDs), now)
 		}
 	}()

@@ -20,6 +20,8 @@ type LogicCore struct {
 	shooter     *Shooter
 	broadcaster *Broadcaster
 	dashboard   *Dashboard
+	bearer      string
+	number      string
 }
 
 func InitLogicCore(l *Ledger, myLotIDs []string, vol int, val int, uom string, privKey crypto.PrivKey, bearer, number string, node *Node) *LogicCore {
@@ -31,7 +33,7 @@ func InitLogicCore(l *Ledger, myLotIDs []string, vol int, val int, uom string, p
 		myID = pid.String()
 	}
 	shooter := NewShooter(bearer, number, myLotIDs, l)
-	broadcaster := NewBroadcaster(l, privKey, myID)
+	broadcaster := NewBroadcaster(l, privKey, myID, bearer, number)
 	dashboard := NewDashboard(l, myLotIDs, vol, val)
 
 	return &LogicCore{
@@ -43,6 +45,8 @@ func InitLogicCore(l *Ledger, myLotIDs []string, vol int, val int, uom string, p
 		shooter:     shooter,
 		broadcaster: broadcaster,
 		dashboard:   dashboard,
+		bearer:      bearer,
+		number:      number,
 	}
 }
 
@@ -147,13 +151,13 @@ func (lc *LogicCore) Run(ctx context.Context, node *Node) {
 
 func (lc *LogicCore) HandleMessage(ctx context.Context, node *Node, m NodeMessage) {
 	if m.PeerID != node.Host.ID() {
-		fmt.Printf("[Debug] Пришел тип: %s | Лот: %s | От: %s\n", m.Type, m.LotID, m.PeerID)
+		fmt.Printf("[Debug] Пришел тип: %s | Лот: %s | От: %s\n", m.Type, m.LotID, m.PeerID[len(m.PeerID)-8:])
 	}
 
 	switch m.Type {
 	case "ANNOUNCE", "ROCKET":
 		pubKey, _ := PubKeyFromPeerID(m.PeerID)
-		needsCorrection := lc.ledger.Update(m.LotID, m.PeerID, pubKey, m.T, m.R, m.JoinedAt, m.LastTopTick, m.LastEpoch)
+		needsCorrection := lc.ledger.Update(m.LotID, m.PeerID, pubKey, m.T, m.JoinedAt, m.LastTopTick, m.LastEpoch, m.ActiveOps, m.NetOps)
 		if needsCorrection && m.Type == "ANNOUNCE" {
 			go lc.broadcaster.broadcastSyncCorrection(m, node.Topic)
 		}
@@ -185,8 +189,8 @@ func (lc *LogicCore) HandleMessage(ctx context.Context, node *Node, m NodeMessag
 				if m.T > p.T {
 					p.T = m.T
 				}
-				if m.R > p.R {
-					p.R = m.R
+				if m.NetOps < p.NetOps {
+					p.NetOps = m.NetOps
 				}
 				if m.LastTopTick > p.LastTopTick {
 					p.LastTopTick = m.LastTopTick
@@ -244,7 +248,6 @@ func (lc *LogicCore) dutyLoop(ctx context.Context, node *Node) {
 func (lc *LogicCore) announceLoop(ctx context.Context, node *Node) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -258,17 +261,25 @@ func (lc *LogicCore) announceLoop(ctx context.Context, node *Node) {
 			for _, me := range participants {
 				if currentEpoch > me.LastEpoch {
 					me.T /= 2
-					me.R /= 2
 					me.LastEpoch = currentEpoch
 				}
 				me.LastSeen = time.Now()
-
+                if time.Since(me.OpsCooldown) >= 9*time.Second {
+                    result, err := t2api.GetActiveOps(lc.bearer, lc.number, me.LotID)
+                	if err == nil {
+                	    me.ActiveOps = result
+                	    me.OpsCooldown = time.Now()
+                	} else {
+                	    fmt.Println("Ошибка запроса ActiveOps:", err)
+                	}
+                }
 				msg := &pb.NodeMessage{
 					Type:        "ANNOUNCE",
 					LotId:       me.LotID,
 					PeerId:      node.Host.ID().String(),
 					T:           me.T,
-					R:           me.R,
+					ActiveOps:   me.ActiveOps,
+					NetOps:      me.NetOps,
 					JoinedAt:    me.JoinedAt,
 					LastTopTick: me.LastTopTick,
 					LastEpoch:   me.LastEpoch,

@@ -51,7 +51,7 @@ func (d *Dashboard) ShowDashboard(node *Node, rendezvous string, amITheShooter f
 	fmt.Println(doubleDelim)
 	fmt.Printf("          СЕГМЕНТ: %d ГБ / %d РУБ | %s\n", d.volume, d.value, rendezvous)
 	fmt.Println(doubleDelim)
-	fmt.Printf("%-6s | %-12s | %-4s | %-4s | %-4s | %-6s | %-4s\n", "#", "PeerID", "T", "R", "W", "P", "Trust")
+	fmt.Printf("%-6s | %-12s | %-4s | %-4s | %-4s | %-6s | %-4s\n", "#", "PeerID", "T", "Ops", "W", "P", "Trust")
 	fmt.Println(delim)
 
 	items := d.ledger.GetQueueWithMetrics(node)
@@ -80,8 +80,8 @@ func (d *Dashboard) ShowDashboard(node *Node, rendezvous string, amITheShooter f
 		}
 
 		trust := peerTrust[item.PeerID]
-		fmt.Printf("%s%-1d%s | %-12s | %-4d | %-4d | %-4d | %-6.2f | %-4.0f\n",
-			prefix, i+1, suffix, shortPID, item.T, item.R, item.WaitTime, item.Priority, trust)
+		fmt.Printf("%s%-1d%s | %-12s | %-4d | %-4d | %-4d | %-6.2f | %-5.0f\n",
+			prefix, i+1, suffix, shortPID, item.T, item.NetOps, item.WaitTime, item.Priority, trust)
 	}
 	fmt.Println(doubleDelim)
 }

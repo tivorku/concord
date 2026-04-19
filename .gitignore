@@ -10,3 +10,4 @@ client/license.bin
 client/.env
 client/creds.json
 client/accounts.json
+client/build

@@ -9,16 +9,17 @@ import (
 	"time"
 )
 
-type lotData struct {
+type LotData struct {
 	ID           string
 	Status       string
 	VolumeValue  float64
 	VolumeUOM    string
 	CostAmount   float64
+	PremiumOps   int64
 	CreationDate time.Time
 }
 
-func fetchAccountLots(bearer, number string) ([]lotData, error) {
+func fetchAccountLots(bearer, number string) ([]LotData, error) {
 	url := fmt.Sprintf("https://%s/api/subscribers/7%s/exchange/lots/created", T2Host, number)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -48,6 +49,7 @@ func fetchAccountLots(bearer, number string) ([]lotData, error) {
 			Cost struct {
 				Amount float64 `json:"amount"`
 			} `json:"cost"`
+			PremiumOps int64 `json:"premiumOps"`
 			CreationDate string `json:"creationDate"`
 		} `json:"data"`
 	}
@@ -55,27 +57,40 @@ func fetchAccountLots(bearer, number string) ([]lotData, error) {
 		return nil, fmt.Errorf("Ошибка парсинга JSON: %v", err)
 	}
 
-	lots := make([]lotData, 0, len(res.Data))
+	lots := make([]LotData, 0, len(res.Data))
 	for _, lot := range res.Data {
 		t, err := time.Parse(time.RFC3339, lot.CreationDate)
 		if err != nil {
 			t, _ = time.Parse("2006-01-02T15:04:05Z", lot.CreationDate)
 		}
-		lots = append(lots, lotData{
+		lots = append(lots, LotData{
 			ID:           lot.ID,
 			Status:       lot.Status,
 			VolumeValue:  lot.Volume.Value,
 			VolumeUOM:    lot.Volume.UOM,
 			CostAmount:   lot.Cost.Amount,
+			PremiumOps:   lot.PremiumOps,
 			CreationDate: t,
 		})
 	}
 
 	return lots, nil
 }
+func GetActiveOps(bearer, number string, lotID string) (int64, error) {
+    lots, err := fetchAccountLots(bearer, number)
+    if err != nil {
+        return 0, err
+    }
+    for _, lot := range lots {
+        if lot.ID == lotID {
+            return lot.PremiumOps, nil
+        }
+    }
+    return 0, nil
+}
 
-func isActiveLot(lot lotData) bool {
-	if lot.Status != "active" {
+func isEligibleLot(lot LotData) bool {
+	if lot.Status != "active" || lot.PremiumOps == 0 {
 		return false
 	}
 	if time.Since(lot.CreationDate).Hours() > 30*24 {
@@ -84,7 +99,7 @@ func isActiveLot(lot lotData) bool {
 	return true
 }
 
-func GetSegments(bearer, number string) ([]Segment, []lotData, error) {
+func GetSegments(bearer, number string) ([]Segment, []LotData, error) {
 	lots, err := fetchAccountLots(bearer, number)
 	if err != nil {
 		return nil, nil, err
@@ -92,7 +107,7 @@ func GetSegments(bearer, number string) ([]Segment, []lotData, error) {
 
 	segMap := make(map[string]Segment)
 	for _, lot := range lots {
-		if !isActiveLot(lot) {
+		if !isEligibleLot(lot) {
 			continue
 		}
 
@@ -113,10 +128,10 @@ func GetSegments(bearer, number string) ([]Segment, []lotData, error) {
 	return segments, lots, nil
 }
 
-func FilterLotsBySegment(lots []lotData, seg Segment) []string {
+func FilterLotsBySegment(lots []LotData, seg Segment) []string {
 	var lotIDs []string
 	for _, lot := range lots {
-		if !isActiveLot(lot) {
+		if !isEligibleLot(lot) {
 			continue
 		}
 		if lot.VolumeUOM == seg.UOM && int(lot.VolumeValue) == seg.Volume && int(lot.CostAmount) == seg.Cost {

@@ -19,6 +19,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
+	"github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
 )
 
@@ -88,6 +89,15 @@ func main() {
 	myResources.Limit.Duration = 30 * time.Minute
 	h, err := libp2p.New(
 		libp2p.Identity(privKey),
+		libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
+			var filtered []multiaddr.Multiaddr
+			for _, addr := range addrs {
+				if manet.IsPublicAddr(addr) && !manet.IsIPLoopback(addr) {
+					filtered = append(filtered, addr)
+				}
+			}
+			return filtered
+		}),
 		libp2p.ListenAddrStrings(
 			"/ip4/0.0.0.0/tcp/42954",
 			"/ip4/0.0.0.0/udp/42954/quic-v1",

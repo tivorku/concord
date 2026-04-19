@@ -16,13 +16,17 @@ type Broadcaster struct {
 	ledger  *Ledger
 	privKey crypto.PrivKey
 	myID    string
+	bearer string
+	number string
 }
 
-func NewBroadcaster(ledger *Ledger, privKey crypto.PrivKey, myID string) *Broadcaster {
+func NewBroadcaster(ledger *Ledger, privKey crypto.PrivKey, myID, bearer, number string) *Broadcaster {
 	return &Broadcaster{
 		ledger:  ledger,
 		privKey: privKey,
 		myID:    myID,
+		bearer:  bearer,
+		number:  number,
 	}
 }
 
@@ -53,8 +57,14 @@ func (b *Broadcaster) broadcastRocketFired(topic *pubsub.Topic, lotID string) {
 		b.ledger.mu.Unlock()
 		return
 	}
-	me.R++
-	me.T = me.T + int64(rand.Intn(3)) + 1
+	// mocking time in top
+	me.T += int64(rand.Intn(3)) + 1
+	
+	me.NetOps--
+	result, err := t2api.GetActiveOps(b.bearer, b.number, lotID)
+	if err == nil {
+	    me.ActiveOps = result
+	}
 	me.LastTopTick = time.Now().Unix() + NetworkTimeOffset
 	currentEpoch := GetCurrentEpoch()
 	msg := &pb.NodeMessage{
@@ -62,7 +72,8 @@ func (b *Broadcaster) broadcastRocketFired(topic *pubsub.Topic, lotID string) {
 		LotId:       lotID,
 		PeerId:      b.myID,
 		T:           me.T,
-		R:           me.R,
+		ActiveOps:   me.ActiveOps,
+		NetOps:      me.NetOps,
 		LastTopTick: me.LastTopTick,
 		JoinedAt:    me.JoinedAt,
 		LastEpoch:   currentEpoch,
@@ -102,7 +113,8 @@ func (b *Broadcaster) broadcastSyncCorrection(m NodeMessage, topic *pubsub.Topic
 		LotId:       m.LotID,
 		PeerId:      m.PeerID.String(),
 		T:           p.T,
-		R:           p.R,
+		ActiveOps:   p.ActiveOps,
+		NetOps:      p.NetOps,
 		LastEpoch:   p.LastEpoch,
 		LastTopTick: p.LastTopTick,
 	}
