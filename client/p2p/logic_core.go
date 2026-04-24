@@ -126,9 +126,9 @@ func (lc *LogicCore) AmITheShooter(node *Node) (string, bool) {
 		return "", false
 	}
 
-	bestLot := myItems[0].LotID
+	myBestLot := myItems[0].LotID
 
-	if leaderLotID == bestLot {
+	if leaderLotID == myBestLot {
 		fmt.Println("[Brain] Моя очередь!")
 		return leaderLotID, true
 	}
@@ -153,10 +153,25 @@ func (lc *LogicCore) HandleMessage(ctx context.Context, node *Node, m NodeMessag
 	if m.PeerID != node.Host.ID() {
 		fmt.Printf("[Debug] Пришел тип: %s | Лот: %s | От: %s\n", m.Type, m.LotID, m.PeerID[len(m.PeerID)-8:])
 	}
+	timestamp, banned := lc.ledger.Blocklist[m.LotID]
+	if banned {
+	    if time.Since(timestamp) > 30*time.Minute {
+	        go lc.broadcaster.broadcastUnbanSync(m, node.Topic)
+	        delete(lc.ledger.Blocklist, m.LotID)
+	    } else {
+	        return
+	    }
+	}
 
 	switch m.Type {
 	case "ANNOUNCE", "ROCKET":
 		pubKey, _ := PubKeyFromPeerID(m.PeerID)
+		if m.NetOps - m.ActiveOps > 0 {
+		    lc.ledger.mu.Lock()
+		    lc.ledger.Blocklist[m.LotID] = time.Now()
+		    lc.ledger.mu.Unlock()
+            go lc.broadcaster.broadcastViolation(m, node.Topic)
+        }
 		needsCorrection := lc.ledger.Update(m.LotID, m.PeerID, pubKey, m.T, m.JoinedAt, m.LastTopTick, m.LastEpoch, m.ActiveOps, m.NetOps)
 		if needsCorrection && m.Type == "ANNOUNCE" {
 			go lc.broadcaster.broadcastSyncCorrection(m, node.Topic)
@@ -170,7 +185,7 @@ func (lc *LogicCore) HandleMessage(ctx context.Context, node *Node, m NodeMessag
 			lotID, isMyTurn := lc.AmITheShooter(node)
 			if isMyTurn {
 				if lc.shooter.TryLock() {
-					go lc.shooter.PerformExecution(ctx, node.Topic, node, lotID, lc.broadcaster)
+					go lc.shooter.PerformExecution(ctx, node, lotID, lc.broadcaster)
 				}
 			}
 		}
@@ -195,6 +210,30 @@ func (lc *LogicCore) HandleMessage(ctx context.Context, node *Node, m NodeMessag
 				if m.LastTopTick > p.LastTopTick {
 					p.LastTopTick = m.LastTopTick
 				}
+			}
+		}
+		lc.ledger.mu.Unlock()
+	case "VIOLATION":
+	    lc.ledger.mu.Lock()
+	    if m.NetOps - m.ActiveOps > 0 {
+    		if !lc.isMyLot(m.LotID) {
+                lc.ledger.Blocklist[m.LotID] = time.Now()
+    		}
+		}
+		lc.ledger.mu.Unlock()
+	case "UNBAN":
+	    lc.ledger.mu.Lock()
+		participants := lc.ledger.Members[m.PeerID.String()]
+		var p *Participant
+		for _, part := range participants {
+			if part.LotID == m.LotID {
+				p = part
+				break
+			}
+		}
+		if p != nil && lc.isMyLot(m.LotID) {
+		    if p.NetOps - p.ActiveOps > 0 {
+			    p.NetOps = p.ActiveOps
 			}
 		}
 		lc.ledger.mu.Unlock()

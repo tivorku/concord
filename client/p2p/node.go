@@ -53,7 +53,7 @@ const (
 const ProtocolProxy protocol.ID = "/mdn/proxy/1.0.0"
 
 type NodeMessage struct {
-	Type        string  `json:"type"` // ANNOUNCE, ROCKET, TOP, SYNC
+	Type        string  `json:"type"` // ANNOUNCE, ROCKET, TOP, SYNC, VIOLATION
 	LotID       string  `json:"lot_id"`
 	PeerID      peer.ID `json:"peer_id"`
 	T           int64   `json:"t"` // тики
@@ -217,7 +217,7 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
 	}()
 	return
 }
-func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, lc *LogicCore) (*pubsub.Topic, error) {
+func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, lc *LogicCore) *pubsub.Topic {
 	params := pubsub.DefaultGossipSubParams()
 	params.HeartbeatInterval = 500 * time.Millisecond
 	params.PruneBackoff = 5 * time.Second
@@ -265,6 +265,8 @@ func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, 
 				LotID:       pm.LotId,
 				PeerID:      pID,
 				T:           pm.T,
+				ActiveOps:   pm.ActiveOps,
+				NetOps:      pm.NetOps,
 				JoinedAt:    pm.JoinedAt,
 				LastEpoch:   pm.LastEpoch,
 				LastTopTick: pm.LastTopTick,
@@ -274,7 +276,7 @@ func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, 
 			lc.HandleMessage(ctx, node, m)
 		}
 	}()
-	return topic, nil
+	return topic
 }
 
 func GetPrivateKey(path string) (crypto.PrivKey, error) {

@@ -82,11 +82,6 @@ func main() {
 
 		myLotIDs = t2api.FilterLotsBySegment(lots, selectedSeg)
 
-		if len(myLotIDs) == 0 {
-			fmt.Println("Нет лотов в выбранном сегменте")
-			os.Exit(1)
-		}
-
 		uom = selectedSeg.UOM
 		volume = selectedSeg.Volume
 		value = selectedSeg.Cost
@@ -127,7 +122,7 @@ func main() {
 	go myLedger.StartJanitor(ctx, node)
 	core := p2p.InitLogicCore(myLedger, myLotIDs, volume, value, uom, privKey, bearer, number, node)
 	node.RegisterProxyHandler()
-	node.Topic, _ = p2p.StartPubSub(ctx, h, rendezvous, myLedger, core)
+	node.Topic = p2p.StartPubSub(ctx, h, rendezvous, myLedger, core)
 
 	go core.Run(ctx, node)
 

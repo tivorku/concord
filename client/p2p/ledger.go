@@ -28,16 +28,19 @@ type Participant struct {
 type Ledger struct {
 	mu      sync.RWMutex
 	Members map[string][]*Participant // ключ = PeerID.String()
+	Blocklist map[string]time.Time
 }
 
 func NewLedger() *Ledger {
 	return &Ledger{
 		Members: make(map[string][]*Participant),
+		Blocklist: make(map[string]time.Time),
 	}
 }
 
 func (p *Participant) TrustScore() float64 {
-	intervals := float64((time.Now().Unix())-p.JoinedAt) / (20 * 60.0)
+    // 1 интервал - 5 минут
+	intervals := float64((time.Now().Unix())-p.JoinedAt) / (5 * 60.0)
 	if intervals < 0 {
 		return 0
 	}
@@ -49,7 +52,7 @@ func (l *Ledger) IsLotKnown(lotID string) bool {
 	defer l.mu.RUnlock()
 	for _, participants := range l.Members {
 		for _, p := range participants {
-			if p.LotID == lotID {
+			if _, banned := l.Blocklist[lotID]; p.LotID == lotID && !banned {
 				return true
 			}
 		}
@@ -96,11 +99,7 @@ func (l *Ledger) Update(lotID string, pID peer.ID, pubKey crypto.PubKey, incomin
 		})
 		return false
 	}
-    
-    if incomingNetOps - incomingActiveOps > 0 {
-       // TODO: Банить неугодных
-    }
-    
+
 	// Существующий лот — проверки
 	if incomingEpoch < p.LastEpoch {
 		fmt.Println("Отклоняю сообщение из прошлой эпохи.")
@@ -108,7 +107,7 @@ func (l *Ledger) Update(lotID string, pID peer.ID, pubKey crypto.PubKey, incomin
 	}
 	if p.LastEpoch == incomingEpoch {
 		if incomingT < p.T || incomingNetOps > p.NetOps || incomingActiveOps > p.ActiveOps {
-			fmt.Println("Шлю коррекционный пакет на сообщение из этой эпохи с уменьшенными параметрами.")
+			fmt.Println("Шлю коррекционный пакет на сообщение из этой эпохи с ложными параметрами.")
 			return true
 		}
 	} else if incomingEpoch > p.LastEpoch {
@@ -129,6 +128,16 @@ func (l *Ledger) Update(lotID string, pID peer.ID, pubKey crypto.PubKey, incomin
     p.ActiveOps = incomingActiveOps
     p.NetOps = incomingNetOps
     
+    if incomingActiveOps == 0 {
+        delete(l.Blocklist, lotID)
+        parts := l.Members[pID.String()]
+        for i, p := range parts {
+            if p.LotID == lotID {
+                l.Members[pID.String()] = append(parts[:i], parts[i+1:]...)
+                break
+            }
+        }
+    }
 	if joinedAt > p.JoinedAt {
 		p.JoinedAt = joinedAt
 	}
@@ -177,7 +186,7 @@ func (l *Ledger) GetQueueWithMetrics(node *Node) []Item {
 
 	for _, participants := range l.Members {
 		for _, p := range participants {
-			if time.Since(p.LastSeen) > 15*time.Second && p.PeerID != node.Host.ID() {
+			if _, banned := l.Blocklist[p.LotID]; time.Since(p.LastSeen) > 15*time.Second && p.PeerID != node.Host.ID() || banned {
 				continue
 			}
 

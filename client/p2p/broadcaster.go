@@ -16,8 +16,8 @@ type Broadcaster struct {
 	ledger  *Ledger
 	privKey crypto.PrivKey
 	myID    string
-	bearer string
-	number string
+	bearer  string
+	number  string
 }
 
 func NewBroadcaster(ledger *Ledger, privKey crypto.PrivKey, myID, bearer, number string) *Broadcaster {
@@ -41,7 +41,16 @@ func (b *Broadcaster) publish(topic *pubsub.Topic, msg *pb.NodeMessage) {
 	}
 	topic.Publish(context.Background(), raw)
 }
+func (b *Broadcaster) broadcastViolation(m NodeMessage, topic *pubsub.Topic) {
 
+	report := &pb.NodeMessage{
+		Type:        "VIOLATION",
+		LotId:       m.LotID,
+		ActiveOps:   m.ActiveOps,
+		NetOps:      m.NetOps,
+	}
+	b.publish(topic, report)
+}
 func (b *Broadcaster) broadcastRocketFired(topic *pubsub.Topic, lotID string) {
 	b.ledger.mu.Lock()
 
@@ -119,4 +128,12 @@ func (b *Broadcaster) broadcastSyncCorrection(m NodeMessage, topic *pubsub.Topic
 		LastTopTick: p.LastTopTick,
 	}
 	b.publish(topic, correction)
+}
+func (b *Broadcaster) broadcastUnbanSync(m NodeMessage, topic *pubsub.Topic) {
+    // приравниваем NetOps к ActiveOps для снятия бана
+	unban := &pb.NodeMessage{
+		Type:        "UNBAN",
+		LotId:       m.LotID,
+	}
+	b.publish(topic, unban)
 }

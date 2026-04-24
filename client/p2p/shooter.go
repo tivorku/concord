@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -70,7 +69,7 @@ func (s *Shooter) Unlock() {
 	s.shootMu.Unlock()
 }
 
-func (s *Shooter) PerformExecution(ctx context.Context, topic *pubsub.Topic, node *Node, lotID string, broadcaster *Broadcaster) {
+func (s *Shooter) PerformExecution(ctx context.Context, node *Node, lotID string, broadcaster *Broadcaster) {
 	defer s.Unlock()
 
 	if !s.CanShoot(lotID) {
