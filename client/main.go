@@ -108,11 +108,11 @@ func main() {
         	}
 			now := time.Now().Unix() + p2p.NetworkTimeOffset
 			if *useMock {
-			    myLedger.Update(lotID, h.ID(), p2p.PrivKeyToPubKey(privKey), 0, now, 0, p2p.GetCurrentEpoch(), 5, 5)
+			    myLedger.Update(lotID, h.ID(), privKey.GetPublic(), 0, now, 0, p2p.GetCurrentEpoch(), 5, 5)
 			} else {
 			    for _, lot := range lots {
 			        if lot.ID == lotID {
-    			        myLedger.Update(lotID, h.ID(), p2p.PrivKeyToPubKey(privKey), 0, now, 0, p2p.GetCurrentEpoch(), lot.PremiumOps, lot.PremiumOps)
+    			        myLedger.Update(lotID, h.ID(), privKey.GetPublic(), 0, now, 0, p2p.GetCurrentEpoch(), lot.PremiumOps, lot.PremiumOps)
 			        }
 			    }
 			}

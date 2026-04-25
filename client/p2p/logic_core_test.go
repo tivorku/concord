@@ -10,7 +10,7 @@ import (
 func TestAnalyzeTarget_IsBot(t *testing.T) {
 	ledger := NewLedger()
 	priv, _, _ := crypto.GenerateEd25519Key(nil)
-	lc := InitLogicCore(ledger, []string{"lot-1"}, 10, 100, "gb", priv, "bearer", "number", nil)
+	lc := InitLogicCore(ledger, []string{"lot-1"}, 10, 150, "gb", priv, "bearer", "number", nil)
 
 	result := lc.AnalyzeTarget("any-lot", true)
 	if result {
@@ -21,7 +21,7 @@ func TestAnalyzeTarget_IsBot(t *testing.T) {
 func TestAnalyzeTarget_KnownLot(t *testing.T) {
 	ledger := NewLedger()
 	priv, _, _ := crypto.GenerateEd25519Key(nil)
-	lc := InitLogicCore(ledger, []string{"lot-1"}, 10, 100, "gb", priv, "bearer", "number", nil)
+	lc := InitLogicCore(ledger, []string{"lot-1"}, 10, 150, "gb", priv, "bearer", "number", nil)
 
 	pID, pubKey := generateTestPeer()
 	now := time.Now().Unix()
@@ -37,7 +37,7 @@ func TestAnalyzeTarget_KnownLot(t *testing.T) {
 func TestAnalyzeTarget_UnknownLot(t *testing.T) {
 	ledger := NewLedger()
 	priv, _, _ := crypto.GenerateEd25519Key(nil)
-	lc := InitLogicCore(ledger, []string{"lot-1"}, 10, 100, "gb", priv, "bearer", "number", nil)
+	lc := InitLogicCore(ledger, []string{"lot-1"}, 10, 150, "gb", priv, "bearer", "number", nil)
 
 	result := lc.AnalyzeTarget("unknown-lot", false)
 	if !result {
@@ -91,7 +91,7 @@ func TestBroadcaster_New(t *testing.T) {
 
 func TestDashboard_IsMyLot(t *testing.T) {
 	ledger := NewLedger()
-	d := NewDashboard(ledger, []string{"lot-1", "lot-2"}, 10, 100)
+	d := NewDashboard(ledger, []string{"lot-1", "lot-2"}, 10, 150)
 
 	if !d.isMyLot("lot-1") {
 		t.Error("lot-1 should be my lot")

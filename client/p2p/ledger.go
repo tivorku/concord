@@ -100,7 +100,6 @@ func (l *Ledger) Update(lotID string, pID peer.ID, pubKey crypto.PubKey, incomin
 		return false
 	}
 
-	// Существующий лот — проверки
 	if incomingEpoch < p.LastEpoch {
 		fmt.Println("Отклоняю сообщение из прошлой эпохи.")
 		return false
@@ -178,18 +177,16 @@ func GetCurrentEpoch() int64 {
 }
 
 func (l *Ledger) GetQueueWithMetrics(node *Node) []Item {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 
 	now := time.Now().Unix() + NetworkTimeOffset
 	var items []Item
-
 	for _, participants := range l.Members {
 		for _, p := range participants {
-			if _, banned := l.Blocklist[p.LotID]; time.Since(p.LastSeen) > 15*time.Second && p.PeerID != node.Host.ID() || banned {
+			if _, banned := l.Blocklist[p.LotID]; (time.Since(p.LastSeen) > 15*time.Second && p.PeerID != node.Host.ID()) || banned {
 				continue
 			}
-
 			waitTime := p.LastTopTick
 			if waitTime == 0 {
 				waitTime = p.JoinedAt + NetworkTimeOffset
@@ -204,8 +201,8 @@ func (l *Ledger) GetQueueWithMetrics(node *Node) []Item {
 			if satiety == 0 {
 				satiety = 1
 			}
+			
 			priority := (satiety * satiety * 0.05) / (float64(waitTime))
-
 			items = append(items, Item{
 				LotID:     p.LotID,
 				Priority:  priority,
@@ -219,7 +216,6 @@ func (l *Ledger) GetQueueWithMetrics(node *Node) []Item {
 			})
 		}
 	}
-
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].Priority != items[j].Priority {
 			return items[i].Priority < items[j].Priority
@@ -229,7 +225,6 @@ func (l *Ledger) GetQueueWithMetrics(node *Node) []Item {
 		}
 		return items[i].PeerID < items[j].PeerID
 	})
-
 	return items
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"time"
+	"sync"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -71,7 +72,7 @@ func (lc *LogicCore) VerifyIncomingMessage(pm *pb.NodeMessage, senderID peer.ID)
 		return false
 	}
 
-	pubKey, err := PubKeyFromPeerID(pID)
+	pubKey, err := pID.ExtractPublicKey()
 	if err != nil {
 		fmt.Printf("[SECURITY] Cannot extract pubkey from %s: %v\n", pID, err)
 		return false
@@ -119,6 +120,11 @@ func (lc *LogicCore) AmITheShooter(node *Node) (string, bool) {
 
 	if !lc.isMyLot(leaderLotID) {
 		return "", false
+	} else {
+        if _, banned := lc.ledger.Blocklist[leaderLotID]; banned {
+            fmt.Println("Этот лот находится в бане")
+            return "", false
+        }
 	}
 
 	myItems := lc.dashboard.GetMyLotsSortedByPriority(node)
@@ -165,7 +171,7 @@ func (lc *LogicCore) HandleMessage(ctx context.Context, node *Node, m NodeMessag
 
 	switch m.Type {
 	case "ANNOUNCE", "ROCKET":
-		pubKey, _ := PubKeyFromPeerID(m.PeerID)
+		pubKey, _ := m.PeerID.ExtractPublicKey()
 		if m.NetOps - m.ActiveOps > 0 {
 		    lc.ledger.mu.Lock()
 		    lc.ledger.Blocklist[m.LotID] = time.Now()
@@ -216,9 +222,7 @@ func (lc *LogicCore) HandleMessage(ctx context.Context, node *Node, m NodeMessag
 	case "VIOLATION":
 	    lc.ledger.mu.Lock()
 	    if m.NetOps - m.ActiveOps > 0 {
-    		if !lc.isMyLot(m.LotID) {
-                lc.ledger.Blocklist[m.LotID] = time.Now()
-    		}
+            lc.ledger.Blocklist[m.LotID] = time.Now()
 		}
 		lc.ledger.mu.Unlock()
 	case "UNBAN":
@@ -287,6 +291,7 @@ func (lc *LogicCore) dutyLoop(ctx context.Context, node *Node) {
 func (lc *LogicCore) announceLoop(ctx context.Context, node *Node) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	var needsActiveOps bool
 	for {
 		select {
 		case <-ctx.Done():
@@ -298,20 +303,23 @@ func (lc *LogicCore) announceLoop(ctx context.Context, node *Node) {
 			participants := lc.ledger.Members[node.Host.ID().String()]
 			var messages []*pb.NodeMessage
 			for _, me := range participants {
+			    if me.ActiveOps == 0 {
+                    delete(lc.ledger.Blocklist, me.LotID)
+                    parts := lc.ledger.Members[node.Host.ID().String()]
+                    for i, p := range parts {
+                        if p.LotID == me.LotID {
+                            lc.ledger.Members[node.Host.ID().String()] = append(parts[:i], parts[i+1:]...)
+                            break
+                        }
+                    }
+                    return
+                }
+                needsActiveOps = time.Since(me.OpsCooldown) >= 9*time.Second
 				if currentEpoch > me.LastEpoch {
 					me.T /= 2
 					me.LastEpoch = currentEpoch
 				}
 				me.LastSeen = time.Now()
-                if time.Since(me.OpsCooldown) >= 9*time.Second {
-                    result, err := t2api.GetActiveOps(lc.bearer, lc.number, me.LotID)
-                	if err == nil {
-                	    me.ActiveOps = result
-                	    me.OpsCooldown = time.Now()
-                	} else {
-                	    fmt.Println("Ошибка запроса ActiveOps:", err)
-                	}
-                }
 				msg := &pb.NodeMessage{
 					Type:        "ANNOUNCE",
 					LotId:       me.LotID,
@@ -325,9 +333,19 @@ func (lc *LogicCore) announceLoop(ctx context.Context, node *Node) {
 				}
 				messages = append(messages, msg)
 			}
-
 			lc.ledger.mu.Unlock()
-
+            var wg sync.WaitGroup
+            for i := range messages {
+                wg.Add(1)
+                go func(i int) {
+                    defer wg.Done()
+                    if needsActiveOps {
+                        result, _ := t2api.GetActiveOps(lc.bearer, lc.number, messages[i].LotId)
+                        messages[i].ActiveOps = result
+                    }
+                }(i)
+            }
+            wg.Wait()
 			for _, msg := range messages {
 				lc.broadcaster.publish(node.Topic, msg)
 			}

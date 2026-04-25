@@ -46,6 +46,7 @@ func (d *Dashboard) isMyLot(lotID string) bool {
 func (d *Dashboard) ShowDashboard(node *Node, rendezvous string, amITheShooter func(node *Node) (string, bool)) {
 	doubleDelim := "=================================================================="
 	delim := "------------------------------------------------------------------"
+
 	ClearScreen()
 
 	fmt.Println(doubleDelim)
@@ -53,9 +54,9 @@ func (d *Dashboard) ShowDashboard(node *Node, rendezvous string, amITheShooter f
 	fmt.Println(doubleDelim)
 	fmt.Printf("%-6s | %-12s | %-4s | %-4s | %-4s | %-6s | %-4s\n", "#", "PeerID", "T", "Ops", "W", "P", "Trust")
 	fmt.Println(delim)
-
+	
 	items := d.ledger.GetQueueWithMetrics(node)
-
+    
 	peerTrust := make(map[string]float64)
 	for _, item := range items {
 		if item.Trust > peerTrust[item.PeerID] {
@@ -72,6 +73,9 @@ func (d *Dashboard) ShowDashboard(node *Node, rendezvous string, amITheShooter f
 			prefix = ">>"
 			if item.LotID == dutyLotID {
 				suffix = " * "
+			}
+			if _, banned := d.ledger.Blocklist[item.LotID]; banned {
+			    suffix = ColorRed + " # " + ColorReset
 			}
 		}
 		shortPID := item.PeerID
@@ -91,7 +95,9 @@ func (d *Dashboard) GetMyLotsSortedByPriority(node *Node) []Item {
 	var myItems []Item
 	for _, item := range items {
 		if d.isMyLot(item.LotID) {
-			myItems = append(myItems, item)
+		    if _, banned := d.ledger.Blocklist[item.LotID]; !banned {
+			    myItems = append(myItems, item)
+			}
 		}
 	}
 	return myItems

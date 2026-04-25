@@ -65,8 +65,8 @@ func (s *Shooter) TryLock() bool {
 
 func (s *Shooter) Unlock() {
 	s.shootMu.Lock()
+	defer s.shootMu.Unlock()
 	s.isExecuting = false
-	s.shootMu.Unlock()
 }
 
 func (s *Shooter) PerformExecution(ctx context.Context, node *Node, lotID string, broadcaster *Broadcaster) {

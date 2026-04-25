@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/core/peer"
 	pb "market-denet/pb"
 )
 
@@ -33,12 +32,4 @@ func serializeForSigning(msg *pb.NodeMessage) []byte {
 		msg.IsBot,
 	)
 	return []byte(data)
-}
-
-func PubKeyFromPeerID(p peer.ID) (crypto.PubKey, error) {
-	return p.ExtractPublicKey()
-}
-
-func PrivKeyToPubKey(priv crypto.PrivKey) crypto.PubKey {
-	return priv.GetPublic()
 }
