@@ -37,7 +37,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	myLedger := p2p.NewLedger()
+	myLedger := p2p.NewLedger(*useMock)
 
 	var myLotIDs []string
 	var uom string

@@ -98,6 +98,7 @@ func (s *Shooter) PerformExecution(ctx context.Context, node *Node, lotID string
 	}
 
 	fmt.Printf("%s[Brain] Использую туннель через: %s%s\n", ColorRed, proxyID.String()[len(proxyID.String())-8:], ColorReset)
+	
 
 	var err error
 	for attempt := 1; attempt <= 2; attempt++ {

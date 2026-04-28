@@ -68,7 +68,6 @@ func (b *Broadcaster) broadcastRocketFired(topic *pubsub.Topic, lotID string) {
 	}
 	// mocking time in top
 	me.T += int64(rand.Intn(3)) + 1
-	
 	me.NetOps--
 	result, err := t2api.GetActiveOps(b.bearer, b.number, lotID)
 	if err == nil {
@@ -119,7 +118,7 @@ func (b *Broadcaster) broadcastSyncCorrection(m NodeMessage, topic *pubsub.Topic
 
 	correction := &pb.NodeMessage{
 		Type:        "SYNC",
-		LotId:       m.LotID,
+		LotId:       p.LotID,
 		PeerId:      m.PeerID.String(),
 		T:           p.T,
 		ActiveOps:   p.ActiveOps,

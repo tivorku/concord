@@ -61,11 +61,18 @@ func (lc *LogicCore) isMyLot(lotID string) bool {
 }
 
 func (lc *LogicCore) VerifyIncomingMessage(pm *pb.NodeMessage, senderID peer.ID) bool {
+    switch pm.Type {
+    case "SYNC", "VIOLATION", "UNBAN":
+        return true
+    }
 	if len(pm.Signature) == 0 {
 		fmt.Printf("[SECURITY] Message from %s has no signature\n", senderID)
 		return false
 	}
-
+    if senderID.String() != pm.PeerId {
+        fmt.Printf("[SECURITY] Sender %s != message author %s\n", senderID.String(), pm.PeerId)
+        return false
+    }
 	pID, err := peer.Decode(pm.PeerId)
 	if err != nil {
 		fmt.Printf("[SECURITY] Cannot decode peer ID from message: %v\n", err)
@@ -157,7 +164,7 @@ func (lc *LogicCore) Run(ctx context.Context, node *Node) {
 
 func (lc *LogicCore) HandleMessage(ctx context.Context, node *Node, m NodeMessage) {
 	if m.PeerID != node.Host.ID() {
-		fmt.Printf("[Debug] Пришел тип: %s | Лот: %s | От: %s\n", m.Type, m.LotID, m.PeerID[len(m.PeerID)-8:])
+		fmt.Printf("[Debug] Пришел тип: %s | Лот: %s | От: %s | AO: %d | NO: %d\n", m.Type, m.LotID, m.PeerID, m.ActiveOps, m.NetOps)
 	}
 	timestamp, banned := lc.ledger.Blocklist[m.LotID]
 	if banned {
@@ -172,7 +179,7 @@ func (lc *LogicCore) HandleMessage(ctx context.Context, node *Node, m NodeMessag
 	switch m.Type {
 	case "ANNOUNCE", "ROCKET":
 		pubKey, _ := m.PeerID.ExtractPublicKey()
-		if m.NetOps - m.ActiveOps > 0 {
+		if m.NetOps - m.ActiveOps != 0 && !lc.ledger.UseMock {
 		    lc.ledger.mu.Lock()
 		    lc.ledger.Blocklist[m.LotID] = time.Now()
 		    lc.ledger.mu.Unlock()
@@ -303,7 +310,7 @@ func (lc *LogicCore) announceLoop(ctx context.Context, node *Node) {
 			participants := lc.ledger.Members[node.Host.ID().String()]
 			var messages []*pb.NodeMessage
 			for _, me := range participants {
-			    if me.ActiveOps == 0 {
+			    if me.ActiveOps == 0 && !lc.ledger.UseMock {
                     delete(lc.ledger.Blocklist, me.LotID)
                     parts := lc.ledger.Members[node.Host.ID().String()]
                     for i, p := range parts {

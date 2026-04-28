@@ -19,7 +19,6 @@ func TestSignMessage_CreatesSignature(t *testing.T) {
 		LotId:  "test-lot",
 		PeerId: "test-peer",
 		T:      100,
-		R:      5,
 	}
 
 	sig, err := SignMessage(priv, msg)
@@ -62,7 +61,6 @@ func TestVerifySignature_Valid(t *testing.T) {
 		LotId:  "test-lot",
 		PeerId: pID.String(),
 		T:      100,
-		R:      5,
 	}
 
 	sig, _ := SignMessage(priv, msg)

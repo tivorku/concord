@@ -172,7 +172,7 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
 			util.Advertise(ctx, localRouting, rendezvous)
 		}
 	}()
-    go func() {
+    /*go func() {
 		time.Sleep(1 * time.Second)
 		for {
 			fmt.Println("\n[Debug] Текущие адреса:")
@@ -187,7 +187,7 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
 			fmt.Println("[Debug] Разница во времени:", NetworkTimeOffset)
 			time.Sleep(3 * time.Second)
 		}
-	}()
+	}()*/
 	go func() {
 		for {
 			peersChan, err := localRouting.FindPeers(ctx, rendezvous)
@@ -254,8 +254,8 @@ func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, 
 			if err := proto.Unmarshal(msg.Data, &pm); err != nil {
 				continue
 			}
+			
 			pID, _ := peer.Decode(pm.PeerId)
-
 			if !lc.VerifyIncomingMessage(&pm, pID) {
 				continue
 			}

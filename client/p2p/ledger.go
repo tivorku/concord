@@ -29,12 +29,14 @@ type Ledger struct {
 	mu      sync.RWMutex
 	Members map[string][]*Participant // ключ = PeerID.String()
 	Blocklist map[string]time.Time
+	UseMock bool
 }
 
-func NewLedger() *Ledger {
+func NewLedger(useMock bool) *Ledger {
 	return &Ledger{
 		Members: make(map[string][]*Participant),
 		Blocklist: make(map[string]time.Time),
+		UseMock: useMock,
 	}
 }
 
@@ -127,7 +129,7 @@ func (l *Ledger) Update(lotID string, pID peer.ID, pubKey crypto.PubKey, incomin
     p.ActiveOps = incomingActiveOps
     p.NetOps = incomingNetOps
     
-    if incomingActiveOps == 0 {
+    if incomingActiveOps == 0 && !l.UseMock {
         delete(l.Blocklist, lotID)
         parts := l.Members[pID.String()]
         for i, p := range parts {
@@ -184,7 +186,7 @@ func (l *Ledger) GetQueueWithMetrics(node *Node) []Item {
 	var items []Item
 	for _, participants := range l.Members {
 		for _, p := range participants {
-			if _, banned := l.Blocklist[p.LotID]; (time.Since(p.LastSeen) > 15*time.Second && p.PeerID != node.Host.ID()) || banned {
+			if _, banned := l.Blocklist[p.LotID]; time.Since(p.LastSeen) > 15*time.Second && p.PeerID != node.Host.ID() || banned {
 				continue
 			}
 			waitTime := p.LastTopTick
@@ -202,7 +204,7 @@ func (l *Ledger) GetQueueWithMetrics(node *Node) []Item {
 				satiety = 1
 			}
 			
-			priority := (satiety * satiety * 0.05) / (float64(waitTime))
+			priority := (satiety * satiety * 0.5) / (float64(waitTime))
 			items = append(items, Item{
 				LotID:     p.LotID,
 				Priority:  priority,
