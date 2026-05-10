@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"time"
 	"sync"
-
-	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/core/peer"
+	
 	"market-denet/pb"
 	"market-denet/t2api"
 )
@@ -25,16 +23,10 @@ type LogicCore struct {
 	number      string
 }
 
-func InitLogicCore(l *Ledger, myLotIDs []string, vol int, val int, uom string, privKey crypto.PrivKey, bearer, number string, node *Node) *LogicCore {
-	var myID string
-	if node != nil {
-		myID = node.Host.ID().String()
-	} else {
-		pid, _ := peer.IDFromPublicKey(privKey.GetPublic())
-		myID = pid.String()
-	}
+func InitLogicCore(l *Ledger, myLotIDs []string, vol int, val int, uom string, bearer, number string, node *Node) *LogicCore {
+	myID := node.Host.ID().String()
 	shooter := NewShooter(bearer, number, myLotIDs, l)
-	broadcaster := NewBroadcaster(l, privKey, myID, bearer, number)
+	broadcaster := NewBroadcaster(l, myID, bearer, number)
 	dashboard := NewDashboard(l, myLotIDs, vol, val)
 
 	return &LogicCore{
@@ -58,39 +50,6 @@ func (lc *LogicCore) isMyLot(lotID string) bool {
 		}
 	}
 	return false
-}
-
-func (lc *LogicCore) VerifyIncomingMessage(pm *pb.NodeMessage, senderID peer.ID) bool {
-    switch pm.Type {
-    case "SYNC", "VIOLATION", "UNBAN":
-        return true
-    }
-	if len(pm.Signature) == 0 {
-		fmt.Printf("[SECURITY] Message from %s has no signature\n", senderID)
-		return false
-	}
-    if senderID.String() != pm.PeerId {
-        fmt.Printf("[SECURITY] Sender %s != message author %s\n", senderID.String(), pm.PeerId)
-        return false
-    }
-	pID, err := peer.Decode(pm.PeerId)
-	if err != nil {
-		fmt.Printf("[SECURITY] Cannot decode peer ID from message: %v\n", err)
-		return false
-	}
-
-	pubKey, err := pID.ExtractPublicKey()
-	if err != nil {
-		fmt.Printf("[SECURITY] Cannot extract pubkey from %s: %v\n", pID, err)
-		return false
-	}
-
-	if !VerifySignature(pubKey, pm, pm.Signature) {
-		fmt.Printf("[SECURITY] Invalid signature from %s (author=%s)\n", senderID, pID)
-		return false
-	}
-
-	return true
 }
 
 func (lc *LogicCore) AnalyzeTarget(topLotID string, isBot bool) bool {
@@ -163,8 +122,15 @@ func (lc *LogicCore) Run(ctx context.Context, node *Node) {
 }
 
 func (lc *LogicCore) HandleMessage(ctx context.Context, node *Node, m NodeMessage) {
-	if m.PeerID != node.Host.ID() {
-		fmt.Printf("[Debug] Пришел тип: %s | Лот: %s | От: %s | AO: %d | NO: %d\n", m.Type, m.LotID, m.PeerID, m.ActiveOps, m.NetOps)
+    var senderPID string
+    if len(m.SenderPID.String()) > 0 {
+    senderPID = m.SenderPID.String()[len(m.SenderPID.String())-8:]
+    } else {
+        panic("SenderPID len <= 0")
+    }
+    
+	if m.SenderPID != node.Host.ID() {
+		fmt.Printf("[Debug] Пришел тип: %s | Лот: %s | От: %s | AO: %d | NO: %d\n", m.Type, m.LotID, senderPID, m.ActiveOps, m.NetOps)
 	}
 	timestamp, banned := lc.ledger.Blocklist[m.LotID]
 	if banned {
@@ -178,20 +144,19 @@ func (lc *LogicCore) HandleMessage(ctx context.Context, node *Node, m NodeMessag
 
 	switch m.Type {
 	case "ANNOUNCE", "ROCKET":
-		pubKey, _ := m.PeerID.ExtractPublicKey()
 		if m.NetOps - m.ActiveOps != 0 && !lc.ledger.UseMock {
 		    lc.ledger.mu.Lock()
 		    lc.ledger.Blocklist[m.LotID] = time.Now()
 		    lc.ledger.mu.Unlock()
             go lc.broadcaster.broadcastViolation(m, node.Topic)
         }
-		needsCorrection := lc.ledger.Update(m.LotID, m.PeerID, pubKey, m.T, m.JoinedAt, m.LastTopTick, m.LastEpoch, m.ActiveOps, m.NetOps)
+		needsCorrection := lc.ledger.Update(m.LotID, m.SenderPID, m.T, m.JoinedAt, m.LastTopTick, m.LastEpoch, m.ActiveOps, m.NetOps)
 		if needsCorrection && m.Type == "ANNOUNCE" {
 			go lc.broadcaster.broadcastSyncCorrection(m, node.Topic)
 		}
 
 	case "TOP":
-		lc.ledger.UpdateTicks(m.LotID, m.PeerID)
+		lc.ledger.UpdateTicks(m.LotID)
 		status := lc.AnalyzeTarget(m.LotID, m.IsBot)
 
 		if status {
@@ -202,6 +167,7 @@ func (lc *LogicCore) HandleMessage(ctx context.Context, node *Node, m NodeMessag
 				}
 			}
 		}
+
 	case "SYNC":
 		lc.ledger.mu.Lock()
 		participants := lc.ledger.Members[m.PeerID.String()]
@@ -226,21 +192,24 @@ func (lc *LogicCore) HandleMessage(ctx context.Context, node *Node, m NodeMessag
 			}
 		}
 		lc.ledger.mu.Unlock()
+
 	case "VIOLATION":
 	    lc.ledger.mu.Lock()
 	    if m.NetOps - m.ActiveOps > 0 {
             lc.ledger.Blocklist[m.LotID] = time.Now()
 		}
 		lc.ledger.mu.Unlock()
+
 	case "UNBAN":
 	    lc.ledger.mu.Lock()
-		participants := lc.ledger.Members[m.PeerID.String()]
 		var p *Participant
-		for _, part := range participants {
-			if part.LotID == m.LotID {
-				p = part
-				break
-			}
+		for _, participants := range lc.ledger.Members {
+    		for _, part := range participants {
+    			if part.LotID == m.LotID {
+    				p = part
+    				break
+    			}
+    		}
 		}
 		if p != nil && lc.isMyLot(m.LotID) {
 		    if p.NetOps - p.ActiveOps > 0 {
@@ -282,9 +251,9 @@ func (lc *LogicCore) dutyLoop(ctx context.Context, node *Node) {
 					if len(result.Lots) > 0 {
 						lc.broadcaster.broadcastTopStatus(node.Topic, result.Lots[0])
 						m := NodeMessage{
+						    SenderPID: node.Host.ID(),
 							Type:   "TOP",
 							LotID:  result.Lots[0].ID,
-							PeerID: node.Host.ID(),
 							IsBot:  result.Lots[0].IsBot,
 						}
 						lc.HandleMessage(ctx, node, m)
@@ -329,7 +298,6 @@ func (lc *LogicCore) announceLoop(ctx context.Context, node *Node) {
 				me.LastSeen = time.Now()
 				msg := &pb.NodeMessage{
 					Type:        "ANNOUNCE",
-					LotId:       me.LotID,
 					PeerId:      node.Host.ID().String(),
 					T:           me.T,
 					ActiveOps:   me.ActiveOps,

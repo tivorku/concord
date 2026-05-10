@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"sort"
 )
@@ -14,7 +13,6 @@ import (
 type Participant struct {
 	LotID       string
 	PeerID      peer.ID
-	PubKey      crypto.PubKey
 	T           int64
 	ActiveOps   int64
 	NetOps      int64
@@ -62,7 +60,7 @@ func (l *Ledger) IsLotKnown(lotID string) bool {
 	return false
 }
 
-func (l *Ledger) Update(lotID string, pID peer.ID, pubKey crypto.PubKey, incomingT int64, joinedAt int64, lastTopTick int64, incomingEpoch int64, incomingActiveOps int64, incomingNetOps int64) bool {
+func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, joinedAt int64, lastTopTick int64, incomingEpoch int64, incomingActiveOps int64, incomingNetOps int64) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -89,7 +87,6 @@ func (l *Ledger) Update(lotID string, pID peer.ID, pubKey crypto.PubKey, incomin
 		l.Members[peerKey] = append(participants, &Participant{
 			LotID:       lotID,
 			PeerID:      pID,
-			PubKey:      pubKey,
 			T:           incomingT,
 			ActiveOps:   incomingActiveOps,
 			NetOps:      incomingNetOps,
@@ -298,15 +295,16 @@ func (l *Ledger) StartJanitor(ctx context.Context, node *Node) {
 	}
 }
 
-func (l *Ledger) UpdateTicks(lotID string, pID peer.ID) {
+func (l *Ledger) UpdateTicks(lotID string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	participants := l.Members[pID.String()]
-	for _, p := range participants {
-		if p.LotID == lotID {
-			p.T++
-			return
-		}
+	for _, participants := range l.Members {
+    	for _, p := range participants {
+    		if p.LotID == lotID {
+    			p.T++
+    			return
+    		}
+    	}
 	}
 }

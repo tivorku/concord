@@ -30,7 +30,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	"github.com/libp2p/go-libp2p/p2p/discovery/util"
 	"github.com/libp2p/go-libp2p/p2p/net/swarm"
-	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
+	//"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	"github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
 	"google.golang.org/protobuf/proto"
@@ -53,6 +53,7 @@ const (
 const ProtocolProxy protocol.ID = "/mdn/proxy/1.0.0"
 
 type NodeMessage struct {
+    SenderPID   peer.ID  `json:"sender_pid"`
 	Type        string  `json:"type"` // ANNOUNCE, ROCKET, TOP, SYNC, VIOLATION
 	LotID       string  `json:"lot_id"`
 	PeerID      peer.ID `json:"peer_id"`
@@ -63,7 +64,6 @@ type NodeMessage struct {
 	LastEpoch   int64   `json:"last_epoch"`
 	LastTopTick int64   `json:"last_top_tick"`
 	IsBot       bool    `json:"is_bot"`
-	Signature   []byte  `json:"signature"`
 }
 type Node struct {
 	Host          host.Host
@@ -149,7 +149,7 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
 		return
 	}
 	go MaintainRelayConn(ctx, h, relayInfo)
-	go pingRelay(ctx, h, relayInfo.ID)
+	//go pingRelay(ctx, h, relayInfo.ID)
 	kad, err := dht.New(ctx, h, dht.Mode(dht.ModeClient), dht.BootstrapPeers(*relayInfo))
 	if err != nil {
 		panic(err)
@@ -245,7 +245,7 @@ func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, 
 				return
 			}
 
-			senderPID := msg.ReceivedFrom
+			senderPID, _ := peer.IDFromBytes(msg.From)
 			if senderPID == h.ID() {
 				continue
 			}
@@ -254,13 +254,10 @@ func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, 
 			if err := proto.Unmarshal(msg.Data, &pm); err != nil {
 				continue
 			}
-			
-			pID, _ := peer.Decode(pm.PeerId)
-			if !lc.VerifyIncomingMessage(&pm, pID) {
-				continue
-			}
-
+            pID, _ := peer.Decode(pm.PeerId)
+            senderPID, _ = peer.IDFromBytes(msg.From)
 			m := NodeMessage{
+			    SenderPID:   senderPID,
 				Type:        pm.Type,
 				LotID:       pm.LotId,
 				PeerID:      pID,
@@ -271,7 +268,6 @@ func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, 
 				LastEpoch:   pm.LastEpoch,
 				LastTopTick: pm.LastTopTick,
 				IsBot:       pm.IsBot,
-				Signature:   pm.Signature,
 			}
 			lc.HandleMessage(ctx, node, m)
 		}
@@ -465,7 +461,7 @@ func MaintainRelayConn(ctx context.Context, h host.Host, relayInfo *peer.AddrInf
 	}
 }
 
-func pingRelay(ctx context.Context, h host.Host, relayID peer.ID) {
+/*func pingRelay(ctx context.Context, h host.Host, relayID peer.ID) {
 	ps := ping.NewPingService(h)
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
@@ -481,3 +477,4 @@ func pingRelay(ctx context.Context, h host.Host, relayID peer.ID) {
 		}
 	}
 }
+*/

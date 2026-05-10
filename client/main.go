@@ -108,11 +108,11 @@ func main() {
         	}
 			now := time.Now().Unix() + p2p.NetworkTimeOffset
 			if *useMock {
-			    myLedger.Update(lotID, h.ID(), privKey.GetPublic(), 0, now, 0, p2p.GetCurrentEpoch(), 5, 5)
+			    myLedger.Update(lotID, h.ID(), 0, now, 0, p2p.GetCurrentEpoch(), 5, 5)
 			} else {
 			    for _, lot := range lots {
 			        if lot.ID == lotID {
-    			        myLedger.Update(lotID, h.ID(), privKey.GetPublic(), 0, now, 0, p2p.GetCurrentEpoch(), lot.PremiumOps, lot.PremiumOps)
+    			        myLedger.Update(lotID, h.ID(), 0, now, 0, p2p.GetCurrentEpoch(), lot.PremiumOps, lot.PremiumOps)
 			        }
 			    }
 			}
@@ -120,7 +120,7 @@ func main() {
 		}
 	}()
 	go myLedger.StartJanitor(ctx, node)
-	core := p2p.InitLogicCore(myLedger, myLotIDs, volume, value, uom, privKey, bearer, number, node)
+	core := p2p.InitLogicCore(myLedger, myLotIDs, volume, value, uom, bearer, number, node)
 	node.RegisterProxyHandler()
 	node.Topic = p2p.StartPubSub(ctx, h, rendezvous, myLedger, core)
 
