@@ -3,14 +3,18 @@ package p2p
 import (
 	"testing"
 	"time"
+	"context"
 
-	"github.com/libp2p/go-libp2p/core/crypto"
+//	"github.com/libp2p/go-libp2p/core/crypto"
 )
 
 func TestAnalyzeTarget_IsBot(t *testing.T) {
-	ledger := NewLedger()
-	priv, _, _ := crypto.GenerateEd25519Key(nil)
-	lc := InitLogicCore(ledger, []string{"lot-1"}, 10, 150, "gb", priv, "bearer", "number", nil)
+	ledger := NewLedger(true)
+	//priv, _, _ := crypto.GenerateEd25519Key(nil)
+	ctx := context.Background()
+	node := &Node{Host: nil, Ledger: ledger, Ctx: ctx}
+	lc := InitLogicCore(ledger, []string{"lot-1"}, 10, 150, "gb", "bearer", "number", node, true)
+	//core := p2p.InitLogicCore(myLedger, myLotIDs, volume, value, uom, bearer, number, node, *useMock)
 
 	result := lc.AnalyzeTarget("any-lot", true)
 	if result {
@@ -19,14 +23,16 @@ func TestAnalyzeTarget_IsBot(t *testing.T) {
 }
 
 func TestAnalyzeTarget_KnownLot(t *testing.T) {
-	ledger := NewLedger()
-	priv, _, _ := crypto.GenerateEd25519Key(nil)
-	lc := InitLogicCore(ledger, []string{"lot-1"}, 10, 150, "gb", priv, "bearer", "number", nil)
+	ledger := NewLedger(true)
+	//priv, _, _ := crypto.GenerateEd25519Key(nil)
+	ctx := context.Background()
+	node := &Node{Host: nil, Ledger: ledger, Ctx: ctx}
+	lc := InitLogicCore(ledger, []string{"lot-1"}, 10, 150, "gb", "bearer", "number", node, false)
 
-	pID, pubKey := generateTestPeer()
+	pID := generateTestPeer()
 	now := time.Now().Unix()
 	epoch := GetCurrentEpoch()
-	ledger.Update("lot-1", pID, pubKey, 100, 5, now, now, epoch)
+	ledger.Update("lot-1", pID, 100, now, now, epoch, 5, 5)
 
 	result := lc.AnalyzeTarget("lot-1", false)
 	if result {
@@ -35,9 +41,9 @@ func TestAnalyzeTarget_KnownLot(t *testing.T) {
 }
 
 func TestAnalyzeTarget_UnknownLot(t *testing.T) {
-	ledger := NewLedger()
-	priv, _, _ := crypto.GenerateEd25519Key(nil)
-	lc := InitLogicCore(ledger, []string{"lot-1"}, 10, 150, "gb", priv, "bearer", "number", nil)
+	ledger := NewLedger(true)
+	//priv, _, _ := crypto.GenerateEd25519Key(nil)
+	lc := InitLogicCore(ledger, []string{"lot-1"}, 10, 150, "gb", "bearer", "number", nil, true)
 
 	result := lc.AnalyzeTarget("unknown-lot", false)
 	if !result {
@@ -46,7 +52,7 @@ func TestAnalyzeTarget_UnknownLot(t *testing.T) {
 }
 
 func TestShooter_CanShoot(t *testing.T) {
-	ledger := NewLedger()
+	ledger := NewLedger(true)
 	s := NewShooter("bearer", "number", []string{"lot-1"}, ledger)
 
 	if !s.CanShoot("lot-1") {
@@ -77,9 +83,9 @@ func TestShooter_TryLock(t *testing.T) {
 }
 
 func TestBroadcaster_New(t *testing.T) {
-	ledger := NewLedger()
-	priv, _, _ := crypto.GenerateEd25519Key(nil)
-	b := NewBroadcaster(ledger, priv, "test-peer")
+	ledger := NewLedger(true)
+	//priv, _, _ := crypto.GenerateEd25519Key(nil)
+	b := NewBroadcaster(ledger, "test-peer", "mock", "123", true)
 
 	if b == nil {
 		t.Error("NewBroadcaster should not return nil")
@@ -90,7 +96,7 @@ func TestBroadcaster_New(t *testing.T) {
 }
 
 func TestDashboard_IsMyLot(t *testing.T) {
-	ledger := NewLedger()
+	ledger := NewLedger(true)
 	d := NewDashboard(ledger, []string{"lot-1", "lot-2"}, 10, 150)
 
 	if !d.isMyLot("lot-1") {

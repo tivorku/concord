@@ -16,14 +16,16 @@ type Broadcaster struct {
 	myID    string
 	bearer  string
 	number  string
+	useMock bool
 }
 
-func NewBroadcaster(ledger *Ledger, myID, bearer, number string) *Broadcaster {
+func NewBroadcaster(ledger *Ledger, myID, bearer, number string, useMock bool) *Broadcaster {
 	return &Broadcaster{
 		ledger:  ledger,
 		myID:    myID,
 		bearer:  bearer,
 		number:  number,
+		useMock: useMock,
 	}
 }
 
@@ -60,7 +62,9 @@ func (b *Broadcaster) broadcastRocketFired(topic *pubsub.Topic, lotID string) {
 		return
 	}
 	// mocking time in top
-	me.T += int64(rand.Intn(3)) + 1
+	if b.useMock {
+	    me.T += int64(rand.Intn(3)) + 1
+	}
 	me.NetOps--
 	result, err := t2api.GetActiveOps(b.bearer, b.number, lotID)
 	if err == nil {

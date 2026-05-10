@@ -9,15 +9,15 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-func generateTestPeer() (peer.ID, crypto.PubKey) {
+func generateTestPeer() (peer.ID) {
 	priv, pubKey, _ := crypto.GenerateEd25519Key(nil)
 	pID, _ := peer.IDFromPublicKey(pubKey)
 	_ = priv
-	return pID, pubKey
+	return pID
 }
 
 func TestNewLedger_Empty(t *testing.T) {
-	ledger := NewLedger()
+	ledger := NewLedger(true)
 	if ledger == nil {
 		t.Fatal("NewLedger should return non-nil")
 	}
@@ -27,7 +27,7 @@ func TestNewLedger_Empty(t *testing.T) {
 }
 
 func TestIsLotKnown_EmptyLedger(t *testing.T) {
-	ledger := NewLedger()
+	ledger := NewLedger(true)
 
 	if ledger.IsLotKnown("any-lot") {
 		t.Error("Empty ledger should not contain any lots")
@@ -35,12 +35,14 @@ func TestIsLotKnown_EmptyLedger(t *testing.T) {
 }
 
 func TestUpdate_NewParticipant(t *testing.T) {
-	ledger := NewLedger()
-	pID, pubKey := generateTestPeer()
+	ledger := NewLedger(true)
+	pID := generateTestPeer()
 	now := time.Now().Unix()
 	epoch := GetCurrentEpoch()
 
-	needsCorrection := ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch)
+	needsCorrection := ledger.Update("lot-123", pID, 100, now, now, epoch, 5, 5)
+	//myLedger.Update(lotID, h.ID(), 0, now, 0, p2p.GetCurrentEpoch(), 5, 5)
+    // Update(lotID string, pID peer.ID, incomingT int64, joinedAt int64, lastTopTick int64, incomingEpoch int64, incomingActiveOps int64, incomingNetOps int64) bool {
 
 	if needsCorrection {
 		t.Error("New participant should not need correction")
@@ -54,13 +56,13 @@ func TestUpdate_NewParticipant(t *testing.T) {
 }
 
 func TestUpdate_ExistingParticipant(t *testing.T) {
-	ledger := NewLedger()
-	pID, pubKey := generateTestPeer()
+	ledger := NewLedger(true)
+	pID := generateTestPeer()
 	now := time.Now().Unix()
 	epoch := GetCurrentEpoch()
 
-	ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch)
-	needsCorrection := ledger.Update("lot-123", pID, pubKey, 110, 6, now, now, epoch)
+	ledger.Update("lot-123", pID, 100, now, now, epoch, 5, 5)
+	needsCorrection := ledger.Update("lot-123", pID, 110, now, now, epoch, 5, 5)
 
 	if needsCorrection {
 		t.Error("Existing participant with valid update should not need correction")
@@ -68,14 +70,14 @@ func TestUpdate_ExistingParticipant(t *testing.T) {
 }
 
 func TestUpdate_EpochDiffTooLarge(t *testing.T) {
-	ledger := NewLedger()
-	pID, pubKey := generateTestPeer()
+	ledger := NewLedger(true)
+	pID := generateTestPeer()
 	now := time.Now().Unix()
 	epoch := GetCurrentEpoch()
 
-	ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch)
+	ledger.Update("lot-123", pID, 100, now, now, epoch, 5, 5)
 
-	needsCorrection := ledger.Update("lot-123", pID, pubKey, 110, 6, now, now, epoch+5)
+	needsCorrection := ledger.Update("lot-123", pID, 110, now, now, epoch+5, 5, 5)
 
 	if needsCorrection {
 		t.Error("Message with epoch diff > 1 should be rejected (returns false)")
@@ -83,13 +85,13 @@ func TestUpdate_EpochDiffTooLarge(t *testing.T) {
 }
 
 func TestUpdate_TManipulation_Plus3Max(t *testing.T) {
-	ledger := NewLedger()
-	pID, pubKey := generateTestPeer()
+	ledger := NewLedger(true)
+	pID := generateTestPeer()
 	now := time.Now().Unix()
 	epoch := GetCurrentEpoch()
 
-	ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch)
-	ledger.Update("lot-123", pID, pubKey, 200, 6, now, now, epoch)
+	ledger.Update("lot-123", pID, 100, now, now, epoch, 5, 5)
+	ledger.Update("lot-123", pID, 200, now, now, epoch, 5, 5)
 
 	ledger.mu.RLock()
 	p := ledger.Members[pID.String()][0]
@@ -101,32 +103,13 @@ func TestUpdate_TManipulation_Plus3Max(t *testing.T) {
 	}
 }
 
-func TestUpdate_RManipulation_Plus1Max(t *testing.T) {
-	ledger := NewLedger()
-	pID, pubKey := generateTestPeer()
-	now := time.Now().Unix()
-	epoch := GetCurrentEpoch()
-
-	ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch)
-	ledger.Update("lot-123", pID, pubKey, 110, 10, now, now, epoch)
-
-	ledger.mu.RLock()
-	p := ledger.Members[pID.String()][0]
-	actualR := p.R
-	ledger.mu.RUnlock()
-
-	if actualR > 6 {
-		t.Errorf("R should be capped at +1, got %d (original 5 + 10 diff)", actualR)
-	}
-}
-
 func TestUpdate_JoinedAtUpdate(t *testing.T) {
-	ledger := NewLedger()
-	pID, pubKey := generateTestPeer()
+	ledger := NewLedger(true)
+	pID := generateTestPeer()
 	epoch := GetCurrentEpoch()
 
-	ledger.Update("lot-123", pID, pubKey, 100, 5, 900, 900, epoch)
-	ledger.Update("lot-123", pID, pubKey, 110, 6, 1000, 1100, epoch)
+	ledger.Update("lot-123", pID, 100, 900, 900, epoch, 5, 5)
+	ledger.Update("lot-123", pID, 110, 1000, 1100, epoch, 5, 5)
 
 	ledger.mu.RLock()
 	p := ledger.Members[pID.String()][0]
@@ -139,8 +122,8 @@ func TestUpdate_JoinedAtUpdate(t *testing.T) {
 }
 
 func TestUpdate_Concurrent(t *testing.T) {
-	ledger := NewLedger()
-	pID, pubKey := generateTestPeer()
+	ledger := NewLedger(true)
+	pID := generateTestPeer()
 	now := time.Now().Unix()
 	epoch := GetCurrentEpoch()
 
@@ -149,7 +132,7 @@ func TestUpdate_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			ledger.Update("lot-123", pID, pubKey, int64(100+idx), 5, now, now, epoch)
+			ledger.Update("lot-123", pID, int64(100+idx), now, now, epoch, 5, 5)
 		}(i)
 	}
 	wg.Wait()
@@ -160,18 +143,18 @@ func TestUpdate_Concurrent(t *testing.T) {
 }
 
 func TestUpdateTicks(t *testing.T) {
-	ledger := NewLedger()
-	pID, pubKey := generateTestPeer()
+	ledger := NewLedger(true)
+	pID := generateTestPeer()
 	now := time.Now().Unix()
 	epoch := GetCurrentEpoch()
 
-	ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch)
+	ledger.Update("lot-123", pID, 100, now, now, epoch, 5, 5)
 
 	ledger.mu.RLock()
 	oldT := ledger.Members[pID.String()][0].T
 	ledger.mu.RUnlock()
 
-	ledger.UpdateTicks("lot-123", pID)
+	ledger.UpdateTicks("lot-123")
 
 	ledger.mu.RLock()
 	newT := ledger.Members[pID.String()][0].T
@@ -183,14 +166,14 @@ func TestUpdateTicks(t *testing.T) {
 }
 
 func TestGetMyLots(t *testing.T) {
-	ledger := NewLedger()
+	ledger := NewLedger(true)
 	now := time.Now().Unix()
 	epoch := GetCurrentEpoch()
 
 	ledger.mu.Lock()
 	ledger.Members["test-peer"] = []*Participant{
-		{LotID: "lot-1", T: 100, R: 5, JoinedAt: now, LastEpoch: epoch},
-		{LotID: "lot-2", T: 100, R: 5, JoinedAt: now, LastEpoch: epoch},
+		{LotID: "lot-1", T: 100, JoinedAt: now, LastEpoch: epoch},
+		{LotID: "lot-2", T: 100, JoinedAt: now, LastEpoch: epoch},
 	}
 	ledger.mu.Unlock()
 
@@ -204,12 +187,12 @@ func TestGetMyLots(t *testing.T) {
 }
 
 func TestGetSortedQueue(t *testing.T) {
-	ledger := NewLedger()
-	pID, pubKey := generateTestPeer()
+	ledger := NewLedger(true)
+	pID := generateTestPeer()
 	now := time.Now().Unix()
 	epoch := GetCurrentEpoch()
 
-	ledger.Update("lot-123", pID, pubKey, 100, 5, now, now, epoch)
+	ledger.Update("lot-123", pID, 100, now, now, epoch, 5, 5)
 
 	queue := ledger.GetSortedQueue(&Node{})
 	if len(queue) != 1 {

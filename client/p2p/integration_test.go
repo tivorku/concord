@@ -49,15 +49,15 @@ func createTestNode(ctx context.Context, id int) (*TestNode, error) {
 		return nil, err
 	}
 
-	ledger := NewLedger()
+	ledger := NewLedger(true)
 
 	lotID := fmt.Sprintf("test-lot-%d", id)
 
 	now := time.Now().Unix() + NetworkTimeOffset
-	ledger.Update(lotID, h.ID(), priv.GetPublic(), 0, 0, now, 0, GetCurrentEpoch())
+	ledger.Update(lotID, h.ID(), 0, now, 0, GetCurrentEpoch(), 5, 5)
 
 	tempNode := &Node{Host: h}
-	lc := InitLogicCore(ledger, []string{lotID}, TestVolume, TestValue, TestUOM, priv, "mock", "123", tempNode)
+	lc := InitLogicCore(ledger, []string{lotID}, TestVolume, TestValue, TestUOM, "mock", "123", tempNode, true)
 
 	params := pubsub.DefaultGossipSubParams()
 	params.HeartbeatInterval = 500 * time.Millisecond
@@ -118,7 +118,7 @@ func startMessageHandler(ctx context.Context, tn *TestNode, lc *LogicCore) {
 					continue
 				}
 
-				senderPID := msg.ReceivedFrom
+				senderPID, _ := peer.IDFromBytes(msg.From)
 				if senderPID == tn.Host.ID() {
 					continue
 				}
@@ -130,21 +130,18 @@ func startMessageHandler(ctx context.Context, tn *TestNode, lc *LogicCore) {
 
 				pID, _ := peer.Decode(pm.PeerId)
 
-				if !lc.VerifyIncomingMessage(&pm, pID) {
-					continue
-				}
-
 				m := NodeMessage{
+				    SenderPID:   senderPID,
 					Type:        pm.Type,
 					LotID:       pm.LotId,
 					PeerID:      pID,
 					T:           pm.T,
-					R:           pm.R,
+					ActiveOps:   pm.ActiveOps,
+					NetOps:      pm.NetOps,
 					JoinedAt:    pm.JoinedAt,
 					LastEpoch:   pm.LastEpoch,
 					LastTopTick: pm.LastTopTick,
 					IsBot:       pm.IsBot,
-					Signature:   pm.Signature,
 				}
 				lc.HandleMessage(ctx, &Node{
 					Host:   tn.Host,

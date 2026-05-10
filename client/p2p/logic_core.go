@@ -23,10 +23,10 @@ type LogicCore struct {
 	number      string
 }
 
-func InitLogicCore(l *Ledger, myLotIDs []string, vol int, val int, uom string, bearer, number string, node *Node) *LogicCore {
+func InitLogicCore(l *Ledger, myLotIDs []string, vol int, val int, uom string, bearer, number string, node *Node, useMock bool) *LogicCore {
 	myID := node.Host.ID().String()
 	shooter := NewShooter(bearer, number, myLotIDs, l)
-	broadcaster := NewBroadcaster(l, myID, bearer, number)
+	broadcaster := NewBroadcaster(l, myID, bearer, number, useMock)
 	dashboard := NewDashboard(l, myLotIDs, vol, val)
 
 	return &LogicCore{
