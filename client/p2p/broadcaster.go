@@ -7,8 +7,8 @@ import (
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"google.golang.org/protobuf/proto"
-	"market-denet/pb"
-	"market-denet/t2api"
+	"concord/pb"
+	"concord/t2api"
 )
 
 type Broadcaster struct {

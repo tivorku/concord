@@ -17,7 +17,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	utls "github.com/refraction-networking/utls"
-	"market-denet/t2api"
+	"concord/t2api"
 )
 
 type Shooter struct {
@@ -77,7 +77,7 @@ func (s *Shooter) PerformExecution(ctx context.Context, node *Node, lotID string
 	}
 
 	wait := rand.Intn(1000) + 2000
-	fmt.Printf("[Brain] Враг обнаружен! Имитирую раздумья (%d сек)...\n", wait/1000)
+	fmt.Printf("[Brain] Имитирую задержку (%d сек)...\n", wait/1000)
 
 	select {
 	case <-time.After(time.Duration(wait) * time.Millisecond):
@@ -92,7 +92,7 @@ func (s *Shooter) PerformExecution(ctx context.Context, node *Node, lotID string
 		if err == nil {
 			broadcaster.broadcastRocketFired(node.Topic, lotID)
 		} else {
-			fmt.Printf("[Brain] Выстрел не удался: %v\n", err)
+			fmt.Printf("[Brain] Запрос не удался: %v\n", err)
 		}
 		return
 	}
@@ -126,7 +126,7 @@ func (s *Shooter) PerformExecution(ctx context.Context, node *Node, lotID string
 	if err == nil {
 		broadcaster.broadcastRocketFired(node.Topic, lotID)
 	} else {
-		fmt.Printf("[Brain] Выстрел не удался: %v\n", err)
+		fmt.Printf("[Brain] Запрос не удался: %v\n", err)
 	}
 }
 
@@ -220,6 +220,9 @@ func (s *Shooter) CreateProxiedClient(ctx context.Context, h host.Host, proxyPee
 
 type StreamConn struct {
 	network.Stream
+}
+func (c *StreamConn) Close() error {
+    return c.Stream.Reset() 
 }
 
 func (c *StreamConn) LocalAddr() net.Addr                { return nil }

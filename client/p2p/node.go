@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"market-denet/pb"
-	"market-denet/t2api"
+	"concord/pb"
+	"concord/t2api"
 	"net"
 	"net/http"
 	"os"
@@ -30,7 +30,6 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	"github.com/libp2p/go-libp2p/p2p/discovery/util"
 	"github.com/libp2p/go-libp2p/p2p/net/swarm"
-	//"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	"github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
 	"google.golang.org/protobuf/proto"
@@ -359,7 +358,7 @@ func GetProtocolID(uom string, volume, value int) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "%s-%d-%d", uom, volume, value)
 	res := h.Sum(nil)
-	return fmt.Sprintf("/mdn/v0.1/%x", res[len(res)-4:])
+	return fmt.Sprintf("/concord/alpha/%x", res[len(res)-4:])
 }
 
 func KnockToRelay(relayIP string, myID peer.ID, pass string) {
@@ -460,21 +459,3 @@ func MaintainRelayConn(ctx context.Context, h host.Host, relayInfo *peer.AddrInf
 		}
 	}
 }
-
-/*func pingRelay(ctx context.Context, h host.Host, relayID peer.ID) {
-	ps := ping.NewPingService(h)
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			<-ps.Ping(pingCtx, relayID)
-			cancel()
-		}
-	}
-}
-*/

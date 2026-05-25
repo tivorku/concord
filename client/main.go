@@ -5,8 +5,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"market-denet/p2p"
-	"market-denet/t2api"
+	"concord/p2p"
+	"concord/t2api"
 	"os"
 	"runtime"
 	"strings"
@@ -120,7 +120,7 @@ func main() {
 		}
 	}()
 	go myLedger.StartJanitor(ctx, node)
-	core := p2p.InitLogicCore(myLedger, myLotIDs, volume, value, uom, bearer, number, node)
+	core := p2p.InitLogicCore(myLedger, myLotIDs, volume, value, uom, bearer, number, node, *useMock)
 	node.RegisterProxyHandler()
 	node.Topic = p2p.StartPubSub(ctx, h, rendezvous, myLedger, core)
 

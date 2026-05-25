@@ -12,14 +12,16 @@ type Dashboard struct {
 	myLotIDs []string
 	volume   int
 	value    int
+	uom      string
 }
 
-func NewDashboard(ledger *Ledger, myLotIDs []string, volume, value int) *Dashboard {
+func NewDashboard(ledger *Ledger, myLotIDs []string, volume, value int, uom string) *Dashboard {
 	return &Dashboard{
 		ledger:   ledger,
 		myLotIDs: myLotIDs,
 		volume:   volume,
 		value:    value,
+		uom:      uom,
 	}
 }
 
@@ -46,11 +48,18 @@ func (d *Dashboard) isMyLot(lotID string) bool {
 func (d *Dashboard) ShowDashboard(node *Node, rendezvous string, amITheShooter func(node *Node) (string, bool)) {
 	doubleDelim := "=================================================================="
 	delim := "------------------------------------------------------------------"
-
+    var ttype string
 	ClearScreen()
-
+    switch d.uom {
+    case "gb":
+        ttype = "ГБ"
+    case "min":
+        ttype = "мин."
+    case "sms":
+        ttype = "SMS"
+    }
 	fmt.Println(doubleDelim)
-	fmt.Printf("          СЕГМЕНТ: %d ГБ / %d РУБ | %s\n", d.volume, d.value, rendezvous)
+	fmt.Printf("               %d %s / %d РУБ | %s\n", d.volume, ttype, d.value, rendezvous)
 	fmt.Println(doubleDelim)
 	fmt.Printf("%-6s | %-12s | %-4s | %-4s | %-4s | %-6s | %-4s\n", "#", "PeerID", "T", "Ops", "W", "P", "Trust")
 	fmt.Println(delim)

@@ -6,8 +6,8 @@ import (
 	"time"
 	"sync"
 	
-	"market-denet/pb"
-	"market-denet/t2api"
+	"concord/pb"
+	"concord/t2api"
 )
 
 type LogicCore struct {
@@ -27,7 +27,7 @@ func InitLogicCore(l *Ledger, myLotIDs []string, vol int, val int, uom string, b
 	myID := node.Host.ID().String()
 	shooter := NewShooter(bearer, number, myLotIDs, l)
 	broadcaster := NewBroadcaster(l, myID, bearer, number, useMock)
-	dashboard := NewDashboard(l, myLotIDs, vol, val)
+	dashboard := NewDashboard(l, myLotIDs, vol, val, uom)
 
 	return &LogicCore{
 		ledger:      l,
@@ -124,9 +124,9 @@ func (lc *LogicCore) Run(ctx context.Context, node *Node) {
 func (lc *LogicCore) HandleMessage(ctx context.Context, node *Node, m NodeMessage) {
     var senderPID string
     if len(m.SenderPID.String()) > 0 {
-    senderPID = m.SenderPID.String()[len(m.SenderPID.String())-8:]
+        senderPID = m.SenderPID.String()[len(m.SenderPID.String())-8:]
     } else {
-        panic("SenderPID len <= 0")
+        fmt.Println("SenderPID len <= 0")
     }
     
 	if m.SenderPID != node.Host.ID() {
@@ -284,11 +284,13 @@ func (lc *LogicCore) announceLoop(ctx context.Context, node *Node) {
                     parts := lc.ledger.Members[node.Host.ID().String()]
                     for i, p := range parts {
                         if p.LotID == me.LotID {
-                            lc.ledger.Members[node.Host.ID().String()] = append(parts[:i], parts[i+1:]...)
+                            copy(parts[i:], parts[i+1:])
+                            parts[len(parts)-1] = nil
+                            lc.ledger.Members[node.Host.ID().String()] = parts[:len(parts)-1]
                             break
                         }
                     }
-                    return
+                    continue
                 }
                 needsActiveOps = time.Since(me.OpsCooldown) >= 9*time.Second
 				if currentEpoch > me.LastEpoch {
@@ -299,6 +301,7 @@ func (lc *LogicCore) announceLoop(ctx context.Context, node *Node) {
 				msg := &pb.NodeMessage{
 					Type:        "ANNOUNCE",
 					PeerId:      node.Host.ID().String(),
+					LotId:       me.LotID,
 					T:           me.T,
 					ActiveOps:   me.ActiveOps,
 					NetOps:      me.NetOps,
@@ -314,7 +317,7 @@ func (lc *LogicCore) announceLoop(ctx context.Context, node *Node) {
                 wg.Add(1)
                 go func(i int) {
                     defer wg.Done()
-                    if needsActiveOps {
+                    if needsActiveOps && !lc.ledger.UseMock {
                         result, _ := t2api.GetActiveOps(lc.bearer, lc.number, messages[i].LotId)
                         messages[i].ActiveOps = result
                     }

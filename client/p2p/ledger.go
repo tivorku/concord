@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"math"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	"sort"
@@ -64,14 +65,26 @@ func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, joinedAt int
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	incomingPID := pID.String()
+	for otherPeer, participants := range l.Members {
+		if otherPeer == incomingPID {
+			continue
+		}
+		for _, p := range participants {
+			if p.LotID == lotID {
+				fmt.Printf("[Security] Попытка пира %s скопировать лот %s у %s!\n", incomingPID[len(incomingPID)-8:], lotID, otherPeer[len(otherPeer)-8:])
+				return false 
+			}
+		}
+	}
+
 	diff := incomingEpoch - GetCurrentEpoch()
 	if diff < -1 || diff > 1 {
 		fmt.Println("Слишком большая разница эпох.")
 		return false
 	}
 
-	peerKey := pID.String()
-	participants := l.Members[peerKey]
+	participants := l.Members[incomingPID]
 
 	// Ищем существующий лот от этого пира
 	var p *Participant
@@ -84,7 +97,7 @@ func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, joinedAt int
 
 	if p == nil {
 		// Новый лот
-		l.Members[peerKey] = append(participants, &Participant{
+		l.Members[incomingPID] = append(participants, &Participant{
 			LotID:       lotID,
 			PeerID:      pID,
 			T:           incomingT,
@@ -105,7 +118,15 @@ func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, joinedAt int
 	}
 	if p.LastEpoch == incomingEpoch {
 		if incomingT < p.T || incomingNetOps > p.NetOps || incomingActiveOps > p.ActiveOps {
-			fmt.Println("Шлю коррекционный пакет на сообщение из этой эпохи с ложными параметрами.")
+		    switch {
+		    case incomingActiveOps > p.ActiveOps:
+		        fmt.Printf("Шлю коррекционный пакет на сообщение из этой эпохи с ActiveOps. old (%d) -> new (%d)\n", p.ActiveOps, incomingActiveOps)
+	        case incomingT < p.T:
+	            fmt.Printf("Шлю коррекционный пакет на сообщение из этой эпохи с T. old (%d) -> new (%d)\n", p.T, incomingT)
+            case incomingNetOps > p.NetOps:
+                fmt.Printf("Шлю коррекционный пакет на сообщение из этой эпохи с NetOps. old (%d) -> new (%d)\n", p.NetOps, incomingNetOps)
+		    }
+			
 			return true
 		}
 	} else if incomingEpoch > p.LastEpoch {
@@ -131,10 +152,13 @@ func (l *Ledger) Update(lotID string, pID peer.ID, incomingT int64, joinedAt int
         parts := l.Members[pID.String()]
         for i, p := range parts {
             if p.LotID == lotID {
-                l.Members[pID.String()] = append(parts[:i], parts[i+1:]...)
+                copy(parts[i:], parts[i+1:])
+                parts[len(parts)-1] = nil
+                l.Members[pID.String()] = parts[:len(parts)-1]
                 break
             }
         }
+        return false
     }
 	if joinedAt > p.JoinedAt {
 		p.JoinedAt = joinedAt
@@ -200,8 +224,10 @@ func (l *Ledger) GetQueueWithMetrics(node *Node) []Item {
 			if satiety == 0 {
 				satiety = 1
 			}
+			satietyFactor := (satiety * math.Pow(satiety, 0.5))
+			trustFactor := (1.0 + math.Log2(1.0 + p.TrustScore()))
 			
-			priority := (satiety * satiety * 0.5) / (float64(waitTime))
+			priority := satietyFactor / (float64(waitTime) * trustFactor)
 			items = append(items, Item{
 				LotID:     p.LotID,
 				Priority:  priority,
@@ -278,7 +304,7 @@ func (l *Ledger) StartJanitor(ctx context.Context, node *Node) {
 
 			now := time.Now()
 
-			for peerKey, participants := range l.Members {
+			for peerID, participants := range l.Members {
 				allOffline := true
 				for _, p := range participants {
 					if now.Sub(p.LastSeen) <= 30*time.Minute || p.PeerID == node.Host.ID() {
@@ -286,8 +312,8 @@ func (l *Ledger) StartJanitor(ctx context.Context, node *Node) {
 						break
 					}
 				}
-				if allOffline && peerKey != node.Host.ID().String() {
-					delete(l.Members, peerKey)
+				if allOffline && peerID != node.Host.ID().String() {
+					delete(l.Members, peerID)
 				}
 			}
 			l.mu.Unlock()
