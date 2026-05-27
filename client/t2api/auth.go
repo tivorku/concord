@@ -18,8 +18,8 @@ type TokenData struct {
 var bearerURL = fmt.Sprintf("https://sso.t2.ru/auth/realms/tele2-b2c/protocol/openid-connect/token")
 
 func RequestSms(number string) string {
-	smsURL := fmt.Sprintf("https://%s/api/validation/number/7%s", T2Host, number)
-	payload := map[string]string{"sender": "Tele2"}
+	smsURL := fmt.Sprintf("https://api.t2.ru/api/validation/number/7%s", number)
+	payload := map[string]string{"sender": "t2.ru"}
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		fmt.Println(err)
@@ -32,6 +32,7 @@ func RequestSms(number string) string {
 		return ""
 	}
 	request.Header.Set("Content-Type", "application/json; charset=UTF-8")
+	request.Header.Set("Content-Length", "18")
 	setTele2Headers(request, "1")
 
 	response, err := SharedClient.Do(request)
@@ -43,9 +44,11 @@ func RequestSms(number string) string {
 		return ""
 	}
 	defer response.Body.Close()
-
+    
+    body, _ := io.ReadAll(response.Body)
 	if response.StatusCode != http.StatusOK {
 		fmt.Println(response.Status)
+		fmt.Println(string(body))
 	}
 
 	var smsCode string

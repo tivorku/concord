@@ -195,7 +195,7 @@ type Item struct {
 }
 
 func GetCurrentEpoch() int64 {
-	networkUnix := time.Now().Unix() + NetworkTimeOffset
+	networkUnix := time.Now().Unix() + NetworkTimeOffset.Load()
 	return networkUnix / 300
 }
 
@@ -203,7 +203,7 @@ func (l *Ledger) GetQueueWithMetrics(node *Node) []Item {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
-	now := time.Now().Unix() + NetworkTimeOffset
+	now := time.Now().Unix() + NetworkTimeOffset.Load()
 	var items []Item
 	for _, participants := range l.Members {
 		for _, p := range participants {
@@ -212,7 +212,7 @@ func (l *Ledger) GetQueueWithMetrics(node *Node) []Item {
 			}
 			waitTime := p.LastTopTick
 			if waitTime == 0 {
-				waitTime = p.JoinedAt + NetworkTimeOffset
+				waitTime = p.JoinedAt + NetworkTimeOffset.Load()
 			}
 			waitTime = now - waitTime
 			if waitTime < 1 {

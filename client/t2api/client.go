@@ -46,7 +46,7 @@ func ValidateCert(conn net.Conn, expectedFingerprint string) error {
 }
 
 const (
-	AppVersion    = "mytele2-app/6.35.0"
+	AppVersion    = "mytele2-app/6.39.0"
 	OkHttpVersion = "okhttp/4.12.0"
 	T2Host        = "yar.t2.ru"
 	T2FullHost    = "yar.t2.ru:443"
@@ -116,7 +116,6 @@ func init() {
 			MaxIdleConns:       10,
 			IdleConnTimeout:    90 * time.Second,
 			TLSNextProto:       make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
-			DisableCompression: false,
 		},
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/libp2p/go-libp2p"
@@ -42,7 +43,7 @@ type ClientGater struct {
 	myID    peer.ID
 }
 
-var NetworkTimeOffset int64
+var NetworkTimeOffset atomic.Int64
 
 const (
 	ColorRed   = "\033[31m"
@@ -167,8 +168,12 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
 	localRouting := routing.NewRoutingDiscovery(localDHT)
 	go func() {
 		for {
-			time.Sleep(2 * time.Second)
-			util.Advertise(ctx, localRouting, rendezvous)
+    		select {
+    	    case <-ctx.Done():
+    	        return
+    		case <-time.After(2 * time.Second):
+    			util.Advertise(ctx, localRouting, rendezvous)
+    		}
 		}
 	}()
     /*go func() {
@@ -189,29 +194,33 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
 	}()*/
 	go func() {
 		for {
-			peersChan, err := localRouting.FindPeers(ctx, rendezvous)
-			if err != nil {
-				return
-			}
-			for p := range peersChan {
-				if p.ID == h.ID() {
-					continue
-				}
-				go func(peerInfo peer.AddrInfo) {
-					// если адресов нет - ищем их
-					if len(peerInfo.Addrs) == 0 {
-						found, err := localDHT.FindPeer(ctx, peerInfo.ID)
-						if err != nil {
-							return
-						}
-						peerInfo = found
-					}
-					if h.Network().Connectedness(peerInfo.ID) != network.Connected {
-						h.Connect(ctx, peerInfo)
-					}
-				}(p)
-			}
-			time.Sleep(10 * time.Second)
+		    select {
+		    case <-ctx.Done():
+		        return
+	        case <-time.After(10 * time.Second):
+	            peersChan, err := localRouting.FindPeers(ctx, rendezvous)
+    			if err != nil {
+    				return
+    			}
+    			for p := range peersChan {
+    				if p.ID == h.ID() {
+    					continue
+    				}
+    				go func(peerInfo peer.AddrInfo) {
+    					// если адресов нет - ищем их
+    					if len(peerInfo.Addrs) == 0 {
+    						found, err := localDHT.FindPeer(ctx, peerInfo.ID)
+    						if err != nil {
+    							return
+    						}
+    						peerInfo = found
+    					}
+    					if h.Network().Connectedness(peerInfo.ID) != network.Connected {
+    						h.Connect(ctx, peerInfo)
+    					}
+    				}(p)
+    			}
+		    }
 		}
 	}()
 	return
@@ -226,10 +235,14 @@ func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, 
 	go func() {
 		metaTopic, _ := ps.Join("_global_discovery")
 		for {
-			if len(metaTopic.ListPeers()) > 0 {
-				break
+		    select {
+		    case <-ctx.Done():
+		        return
+	        case <-time.After(100 * time.Millisecond):
+    			if len(metaTopic.ListPeers()) > 0 {
+    				break
+    			}
 			}
-			time.Sleep(100 * time.Millisecond)
 		}
 		if err := metaTopic.Publish(ctx, []byte(topicName)); err != nil {
 			fmt.Println(err)
@@ -411,7 +424,7 @@ func KnockToRelay(relayIP string, myID peer.ID, pass string) {
 			os.Exit(7)
 		}
 		actualNetworkNow := time.Unix(serverTime, 0).Add(rtt / 2)
-		NetworkTimeOffset = actualNetworkNow.Unix() - t2.Unix()
+		NetworkTimeOffset.Store(actualNetworkNow.Unix() - t2.Unix())
 	} else {
 		fmt.Print(respBody)
 		os.Exit(7)

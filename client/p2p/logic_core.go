@@ -21,11 +21,12 @@ type LogicCore struct {
 	dashboard   *Dashboard
 	bearer      string
 	number      string
+	wg          *sync.WaitGroup
 }
 
-func InitLogicCore(l *Ledger, myLotIDs []string, vol int, val int, uom string, bearer, number string, node *Node, useMock bool) *LogicCore {
+func InitLogicCore(l *Ledger, myLotIDs []string, vol int, val int, uom string, bearer, number string, node *Node, useMock bool, wg *sync.WaitGroup) *LogicCore {
 	myID := node.Host.ID().String()
-	shooter := NewShooter(bearer, number, myLotIDs, l)
+	shooter := NewShooter(bearer, number, myLotIDs, l, wg)
 	broadcaster := NewBroadcaster(l, myID, bearer, number, useMock)
 	dashboard := NewDashboard(l, myLotIDs, vol, val, uom)
 
@@ -40,6 +41,7 @@ func InitLogicCore(l *Ledger, myLotIDs []string, vol int, val int, uom string, b
 		dashboard:   dashboard,
 		bearer:      bearer,
 		number:      number,
+	    wg:          wg,
 	}
 }
 
@@ -87,10 +89,13 @@ func (lc *LogicCore) AmITheShooter(node *Node) (string, bool) {
 	if !lc.isMyLot(leaderLotID) {
 		return "", false
 	} else {
+	    lc.ledger.mu.Lock()
         if _, banned := lc.ledger.Blocklist[leaderLotID]; banned {
             fmt.Println("Этот лот находится в бане")
+            lc.ledger.mu.Unlock()
             return "", false
         }
+        lc.ledger.mu.Unlock()
 	}
 
 	myItems := lc.dashboard.GetMyLotsSortedByPriority(node)
@@ -132,15 +137,18 @@ func (lc *LogicCore) HandleMessage(ctx context.Context, node *Node, m NodeMessag
 	if m.SenderPID != node.Host.ID() {
 		fmt.Printf("[Debug] Пришел тип: %s | Лот: %s | От: %s | AO: %d | NO: %d\n", m.Type, m.LotID, senderPID, m.ActiveOps, m.NetOps)
 	}
+	lc.ledger.mu.Lock()
 	timestamp, banned := lc.ledger.Blocklist[m.LotID]
 	if banned {
 	    if time.Since(timestamp) > 30*time.Minute {
 	        go lc.broadcaster.broadcastUnbanSync(m, node.Topic)
 	        delete(lc.ledger.Blocklist, m.LotID)
 	    } else {
+	        lc.ledger.mu.Unlock()
 	        return
 	    }
 	}
+	lc.ledger.mu.Unlock()
 
 	switch m.Type {
 	case "ANNOUNCE", "ROCKET":
@@ -163,7 +171,7 @@ func (lc *LogicCore) HandleMessage(ctx context.Context, node *Node, m NodeMessag
 			lotID, isMyTurn := lc.AmITheShooter(node)
 			if isMyTurn {
 				if lc.shooter.TryLock() {
-					go lc.shooter.PerformExecution(ctx, node, lotID, lc.broadcaster)
+					go lc.shooter.PerformExecution(ctx, node, lotID, lc.broadcaster, lc.wg)
 				}
 			}
 		}
@@ -242,7 +250,9 @@ func (lc *LogicCore) dutyLoop(ctx context.Context, node *Node) {
 			isDuty := lc.checkDutyRole(1, node)
 			if isDuty {
 				ch := t2api.GetTop4IDsAsync(trafficType, lc.volume, lc.value)
+				lc.wg.Add(1)
 				go func() {
+				    defer lc.wg.Done()
 					result := <-ch
 					if result.Err != nil {
 						fmt.Println(result.Err)
@@ -300,7 +310,6 @@ func (lc *LogicCore) announceLoop(ctx context.Context, node *Node) {
 				me.LastSeen = time.Now()
 				msg := &pb.NodeMessage{
 					Type:        "ANNOUNCE",
-					PeerId:      node.Host.ID().String(),
 					LotId:       me.LotID,
 					T:           me.T,
 					ActiveOps:   me.ActiveOps,

@@ -66,11 +66,7 @@ func (b *Broadcaster) broadcastRocketFired(topic *pubsub.Topic, lotID string) {
 	    me.T += int64(rand.Intn(3)) + 1
 	}
 	me.NetOps--
-	result, err := t2api.GetActiveOps(b.bearer, b.number, lotID)
-	if err == nil {
-	    me.ActiveOps = result
-	}
-	me.LastTopTick = time.Now().Unix() + NetworkTimeOffset
+	me.LastTopTick = time.Now().Unix() + NetworkTimeOffset.Load()
 	currentEpoch := GetCurrentEpoch()
 	msg := &pb.NodeMessage{
 		Type:        "ROCKET",
@@ -83,6 +79,13 @@ func (b *Broadcaster) broadcastRocketFired(topic *pubsub.Topic, lotID string) {
 		LastEpoch:   currentEpoch,
 	}
 	b.ledger.mu.Unlock()
+	result, err := t2api.GetActiveOps(b.bearer, b.number, lotID)
+	if err == nil {
+	    msg.ActiveOps = result
+	    b.ledger.mu.Lock()
+	    me.ActiveOps = result
+	    b.ledger.mu.Unlock()
+	}
 	b.publish(topic, msg)
 }
 

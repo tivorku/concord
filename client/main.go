@@ -11,6 +11,9 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"os/signal"
+	"syscall"
+	"sync"
 
 	"github.com/joho/godotenv"
 )
@@ -101,12 +104,21 @@ func main() {
 
 	p2p.StartDiscovery(ctx, h, rendezvous)
     go func() {
+        select {
+        case <-ctx.Done():
+            return
+        default:
+        }
 		time.Sleep(200 * time.Millisecond)
 		for i, lotID := range myLotIDs {
     		if i > 0 {
-        		time.Sleep(10 * time.Second)
+        		select {
+        		case <-time.After(10 * time.Second):
+        		case <-ctx.Done():
+        		    return
+        		}
         	}
-			now := time.Now().Unix() + p2p.NetworkTimeOffset
+			now := time.Now().Unix() + p2p.NetworkTimeOffset.Load()
 			if *useMock {
 			    myLedger.Update(lotID, h.ID(), 0, now, 0, p2p.GetCurrentEpoch(), 5, 5)
 			} else {
@@ -120,7 +132,8 @@ func main() {
 		}
 	}()
 	go myLedger.StartJanitor(ctx, node)
-	core := p2p.InitLogicCore(myLedger, myLotIDs, volume, value, uom, bearer, number, node, *useMock)
+	var wg sync.WaitGroup
+	core := p2p.InitLogicCore(myLedger, myLotIDs, volume, value, uom, bearer, number, node, *useMock, &wg)
 	node.RegisterProxyHandler()
 	node.Topic = p2p.StartPubSub(ctx, h, rendezvous, myLedger, core)
 
@@ -139,7 +152,23 @@ func main() {
 		}
 	}()
 
-	select {}
+	sigCh := make(chan os.Signal, 1)
+    signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+    
+    <-sigCh
+    fmt.Printf("\nЗавершение работы...\n")
+    cancel()
+    done := make(chan struct{})
+    go func() {
+        wg.Wait()
+        close(done)
+    }()
+    select {
+    case <-done:
+        fmt.Println("Все операции завершены.")
+    case <-time.After(30*time.Second):
+        fmt.Println("Таймаут ожидания. Принудительнон завершение.")
+    }
 }
 
 func hideAndroidRestrictedNetworkError() {

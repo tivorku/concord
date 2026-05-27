@@ -28,14 +28,16 @@ type Shooter struct {
 	mu             sync.Mutex
 	shootMu        sync.Mutex
 	ledger         *Ledger
+    wg             *sync.WaitGroup
 }
 
-func NewShooter(bearer, number string, myLotIDs []string, ledger *Ledger) *Shooter {
+func NewShooter(bearer, number string, myLotIDs []string, ledger *Ledger, wg *sync.WaitGroup) *Shooter {
 	s := &Shooter{
 		bearer:         bearer,
 		number:         number,
 		lastMyShotTime: make(map[string]time.Time),
 		ledger:         ledger,
+		wg:             wg,
 	}
 	for _, lotID := range myLotIDs {
 		s.lastMyShotTime[lotID] = time.Now().Add(-1 * time.Hour)
@@ -69,7 +71,9 @@ func (s *Shooter) Unlock() {
 	s.isExecuting = false
 }
 
-func (s *Shooter) PerformExecution(ctx context.Context, node *Node, lotID string, broadcaster *Broadcaster) {
+func (s *Shooter) PerformExecution(ctx context.Context, node *Node, lotID string, broadcaster *Broadcaster, wg *sync.WaitGroup) {
+    s.wg.Add(1)
+    defer s.wg.Done()
 	defer s.Unlock()
 
 	if !s.CanShoot(lotID) {

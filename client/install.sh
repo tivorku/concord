@@ -24,7 +24,7 @@ fi
 case "$OS_TYPE" in
     "termux")
         echo "Установка зависимостей через pkg..."
-        pkg update && pkg upgrade -y
+        pkg update -y
         pkg install git golang -y
         ;;
     "linux")

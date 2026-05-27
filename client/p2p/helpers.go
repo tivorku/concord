@@ -41,7 +41,7 @@ func checkDutyRoleInternal(ledger *Ledger, numDutyNodes int, node *Node) bool {
 		}
 	}
 
-	seed := (time.Now().Unix() + NetworkTimeOffset) / 300
+	seed := (time.Now().Unix() + NetworkTimeOffset.Load()) / 300
 	rng := rand.New(rand.NewSource(seed))
 	rng.Shuffle(len(weighted), func(i, j int) {
 		weighted[i], weighted[j] = weighted[j], weighted[i]

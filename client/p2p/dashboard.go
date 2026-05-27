@@ -83,9 +83,11 @@ func (d *Dashboard) ShowDashboard(node *Node, rendezvous string, amITheShooter f
 			if item.LotID == dutyLotID {
 				suffix = " * "
 			}
+		    d.ledger.mu.Lock()
 			if _, banned := d.ledger.Blocklist[item.LotID]; banned {
 			    suffix = ColorRed + " # " + ColorReset
 			}
+			d.ledger.mu.Unlock()
 		}
 		shortPID := item.PeerID
 		if len(shortPID) > 8 {
@@ -104,9 +106,11 @@ func (d *Dashboard) GetMyLotsSortedByPriority(node *Node) []Item {
 	var myItems []Item
 	for _, item := range items {
 		if d.isMyLot(item.LotID) {
+		    d.ledger.mu.Lock()
 		    if _, banned := d.ledger.Blocklist[item.LotID]; !banned {
 			    myItems = append(myItems, item)
 			}
+			d.ledger.mu.Unlock()
 		}
 	}
 	return myItems
