@@ -145,14 +145,16 @@ func (lc *LogicCore) HandleMessage(ctx context.Context, node *Node, m NodeMessag
 	        delete(lc.ledger.Blocklist, m.LotID)
 	    } else {
 	        lc.ledger.mu.Unlock()
-	        return
+	        if m.Type != "UNBAN" {
+	            return
+	        }
 	    }
 	}
 	lc.ledger.mu.Unlock()
 
 	switch m.Type {
 	case "ANNOUNCE", "ROCKET":
-		if m.NetOps - m.ActiveOps != 0 && !lc.ledger.UseMock {
+		if m.NetOps - m.ActiveOps > 0 && !lc.ledger.UseMock {
 		    lc.ledger.mu.Lock()
 		    lc.ledger.Blocklist[m.LotID] = time.Now()
 		    lc.ledger.mu.Unlock()

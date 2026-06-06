@@ -60,7 +60,7 @@ curl -sSL https://raw.githubusercontent.com/tivorku/concord/master/client/instal
 pkg update && pkg upgrade -y
 pkg install git golang -y
 git clone https://github.com/tivorku/concord.git
-cd denet
+cd concord
 go build -ldflags "-checklinkname=0" .
 ./concord
 ```
