@@ -7,7 +7,7 @@ import (
 )
 
 func TestGetTop4IDsAsync_ChannelReturns(t *testing.T) {
-	ch := GetTop4IDsAsync("data", 10, 100)
+	ch := GetTop4IDsAsync("data", 10, 150)
 
 	result := <-ch
 	if result.Err != nil {
@@ -19,7 +19,7 @@ func TestGetTop4IDsAsync_MultipleCalls(t *testing.T) {
 	var callCount int32
 
 	for i := 0; i < 3; i++ {
-		ch := GetTop4IDsAsync("data", 10, 100)
+		ch := GetTop4IDsAsync("data", 10, 150)
 		go func() {
 			<-ch
 			atomic.AddInt32(&callCount, 1)
@@ -30,7 +30,7 @@ func TestGetTop4IDsAsync_MultipleCalls(t *testing.T) {
 	wg.Add(3)
 	for i := 0; i < 3; i++ {
 		go func() {
-			ch := GetTop4IDsAsync("data", 10, 100)
+			ch := GetTop4IDsAsync("data", 10, 150)
 			<-ch
 			atomic.AddInt32(&callCount, 1)
 			wg.Done()

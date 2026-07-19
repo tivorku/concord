@@ -73,14 +73,14 @@ func (lc *LogicCore) AmITheShooter(node *Node) (string, bool) {
 		return "", false
 	}
 
-	hasForeign := false
+	hasSomebodyElse := false
 	for _, lotID := range queue {
 		if !lc.isMyLot(lotID) {
-			hasForeign = true
+			hasSomebodyElse = true
 			break
 		}
 	}
-	if !hasForeign {
+	if !hasSomebodyElse {
 		return "", false
 	}
 

@@ -122,7 +122,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	localDHT, err := dht.New(ctx, h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/mdenet"))
+	localDHT, err := dht.New(ctx, h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/concord"))
 	if err != nil {
 		panic(err)
 	}
@@ -159,7 +159,10 @@ func main() {
 	select {}
 }
 func loadKey() (crypto.PrivKey, error) {
-	data := "c79bbaf8b30abeb7d67680b2091ff8961f9022e9100ae321c840c5e769a717eef26c5b882d34161082675f553790aa3d6f9d04a5425ea2f64bd040f66c93606d"
+	data := os.Getenv("IDENTITY")
+	if data == "" {
+	    log.Fatal("IDENTITY not set")
+	}
 	seed, _ := hex.DecodeString(string(data))
 	return crypto.UnmarshalEd25519PrivateKey(seed)
 }

@@ -110,7 +110,6 @@ func InitHost(ctx context.Context, privKey crypto.PrivKey) (host.Host, error) {
 
 	h, err = libp2p.New(
 		libp2p.Identity(privKey),
-		libp2p.EnableRelay(),
 		libp2p.EnableHolePunching(),
 		libp2p.NATPortMap(),
 		libp2p.EnableAutoNATv2(),
@@ -120,7 +119,7 @@ func InitHost(ctx context.Context, privKey crypto.PrivKey) (host.Host, error) {
 		libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
 			var filtered []multiaddr.Multiaddr
 			for _, addr := range addrs {
-				if manet.IsPublicAddr(addr) && !manet.IsIPLoopback(addr) {
+				if !manet.IsIPLoopback(addr) {
 					filtered = append(filtered, addr)
 				}
 			}
@@ -134,6 +133,7 @@ func InitHost(ctx context.Context, privKey crypto.PrivKey) (host.Host, error) {
 		),
 		libp2p.EnableAutoRelayWithStaticRelays([]peer.AddrInfo{*relayInfo}),
 	)
+		
 	return h, err
 }
 func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
@@ -154,7 +154,7 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
 	if err != nil {
 		panic(err)
 	}
-	localDHT, err := dht.New(ctx, h, dht.Mode(dht.ModeClient), dht.BootstrapPeers(*relayInfo), dht.ProtocolPrefix("/mdenet"))
+	localDHT, err := dht.New(ctx, h, dht.Mode(dht.ModeClient), dht.BootstrapPeers(*relayInfo), dht.ProtocolPrefix("/concord"))
 	if err != nil {
 		panic(err)
 	}
@@ -171,27 +171,29 @@ func StartDiscovery(ctx context.Context, h host.Host, rendezvous string) {
     		select {
     	    case <-ctx.Done():
     	        return
-    		case <-time.After(2 * time.Second):
+    		case <-time.After(10 * time.Second):
     			util.Advertise(ctx, localRouting, rendezvous)
     		}
 		}
 	}()
-    /*go func() {
+
+    go func() {
 		time.Sleep(1 * time.Second)
 		for {
-			fmt.Println("\n[Debug] Текущие адреса:")
+            fmt.Println("\n[Debug] Текущие адреса:")
 			for _, addr := range h.Addrs() {
 				fmt.Println(addr)
 			}
+
 			conns := h.Network().Conns()
 			if h.Network().Connectedness(relayInfo.ID) == network.Connected {
 				fmt.Println("[Debug] Есть соединение с реле")
 			}
 			fmt.Printf("[Debug] Всего сетевых соединений: %d\n", len(conns))
-			fmt.Println("[Debug] Разница во времени:", NetworkTimeOffset)
+			fmt.Println("[Debug] Разница во времени:", NetworkTimeOffset.Load())
 			time.Sleep(3 * time.Second)
 		}
-	}()*/
+	}()
 	go func() {
 		for {
 		    select {
@@ -229,7 +231,7 @@ func StartPubSub(ctx context.Context, h host.Host, topicName string, l *Ledger, 
 	params := pubsub.DefaultGossipSubParams()
 	params.HeartbeatInterval = 500 * time.Millisecond
 	params.PruneBackoff = 5 * time.Second
-	ps, _ := pubsub.NewGossipSub(ctx, h, pubsub.WithPeerExchange(true), pubsub.WithFloodPublish(true), pubsub.WithGossipSubParams(params))
+	ps, _ := pubsub.NewGossipSub(ctx, h, pubsub.WithPeerExchange(true), pubsub.WithGossipSubParams(params))
 	topic, _ := ps.Join(topicName)
 	sub, _ := topic.Subscribe()
 	go func() {
@@ -299,7 +301,6 @@ func GetPrivateKey(path string) (crypto.PrivKey, error) {
 	return crypto.UnmarshalEd25519PrivateKey(seed)
 }
 
-// RegisterProxyHandler — настраивает ноду на роль "посредника"
 func (node *Node) RegisterProxyHandler() {
 	node.Host.SetStreamHandler(ProtocolProxy, func(stream network.Stream) {
 		caller := stream.Conn().RemotePeer()
